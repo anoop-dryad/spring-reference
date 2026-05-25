@@ -174,7 +174,6 @@
                     <configLocation>checkstyle.xml</configLocation>
                     <failOnViolation>false</failOnViolation>
                     <logViolationsToConsole>true</logViolationsToConsole>
-                    <encoding>UTF-8</encoding>
                     <!-- Exclude generated sources (Lombok, Flyway etc.) -->
                     <excludes>**/generated-sources/**</excludes>
                 </configuration>
