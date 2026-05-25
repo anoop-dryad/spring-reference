@@ -13,9 +13,9 @@ spring:
     hibernate:
       ddl-auto: validate
     show-sql: false
+    open-in-view: false
     properties:
       "[hibernate.default_schema]": auth
-      "[hibernate.dialect]": org.hibernate.dialect.PostgreSQLDialect
   flyway:
     url: "jdbc:postgresql://${PGHOST}:${PGPORT}/${DB_NAME}"
     user: "${DB_FLYWAY_USER}"
@@ -32,3 +32,25 @@ jwt:
 logging:
   level:
     "[com.anpks]": "${LOG_LEVEL:INFO}"
+
+springdoc:
+  api-docs:
+    enabled: ${SWAGGER_ENABLED:false}
+    path: /v3/api-docs
+  swagger-ui:
+    enabled: ${SWAGGER_ENABLED:false}
+    path: /swagger-ui.html
+
+# management:
+#   endpoints:
+#     web:
+#       exposure:
+#         include:
+#         - heath,info,prometheus,metrics
+#   endpoint:
+#     health:
+#       show-details: always
+#   metrics:
+#     export:
+#       prometheus:
+#         enabled: true
