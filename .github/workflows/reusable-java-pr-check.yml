@@ -1,0 +1,164 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Reusable — Java PR / Feature Branch Check
+#
+# Called by each service's ci-pr-<service>.yml on feat-*, fix-* branches.
+# Intentionally stops before Docker — no image build, no registry push.
+# Goal: fast feedback (~5 min) for developers.
+#
+# Stages:
+#   1. Maven verify      — unit + integration tests + JaCoCo coverage
+#   2. CodeQL            — GitHub SAST (security-extended queries)
+#   3. Semgrep           — java · owasp-top-ten · spring-boot rules
+#   4. OWASP Dep Check   — CVE scan on pom.xml deps (CVSS ≥ 7.0, non-blocking)
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Reusable — Java PR Check (no Docker)
+
+on:
+  workflow_call:
+    inputs:
+      service-name:
+        description: "Human-readable service name, e.g. auth-service"
+        required: true
+        type: string
+      service-dir:
+        description: "Relative path to the service root containing pom.xml"
+        required: true
+        type: string
+      java-version:
+        description: "Java version to use (default: 21)"
+        required: false
+        type: string
+        default: "21"
+      needs-database:
+        description: "Spin up a local Postgres container for integration tests"
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  pr-check:
+    name: PR Check — ${{ inputs.service-name }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      security-events: write # needed for CodeQL SARIF upload
+      actions: read
+
+    steps:
+      # ── Checkout ─────────────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history needed by CodeQL
+
+      # ── Java ─────────────────────────────────────────────────────────────────
+      - name: Setup Java ${{ inputs.java-version }} (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ inputs.java-version }}
+          distribution: temurin
+          cache: maven # caches ~/.m2 between runs — big speed win
+
+      # ── Optional: Postgres for integration tests ──────────────────────────
+      # Only runs when needs-database: true.
+      # Uses alpine image — starts in ~5 sec, minimal overhead.
+      - name: Start PostgreSQL (integration tests)
+        if: ${{ inputs.needs-database }}
+        run: |
+          docker run -d \
+            --name testdb \
+            -e POSTGRES_DB=testdb \
+            -e POSTGRES_USER=testuser \
+            -e POSTGRES_PASSWORD=testpass \
+            -p 5432:5432 \
+            postgres:15-alpine
+          # Wait until pg_isready before proceeding (~3-8 sec)
+          until docker exec testdb pg_isready -U testuser 2>/dev/null; do
+            echo "Waiting for Postgres…"; sleep 2
+          done
+          echo "PostgreSQL ready."
+
+      # ── CodeQL init (must happen BEFORE Maven build) ──────────────────────
+      # CodeQL instruments the build to trace compiled code.
+      # Do NOT move this step after Maven.
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: java
+          queries: security-extended # broader than default — includes CWE rules
+
+      # ── Maven Build + Tests ───────────────────────────────────────────────
+      # mvn verify = compile → test → integration-test → verify
+      # JaCoCo agent is bound to the verify phase via pom.xml plugin config.
+      - name: Maven verify (tests + JaCoCo coverage)
+        run: cd ${{ inputs.service-dir }} && mvn verify --no-transfer-progress -B
+        env:
+          # Only set when needs-database is true; empty string otherwise
+          SPRING_DATASOURCE_URL: ${{ inputs.needs-database && 'jdbc:postgresql://localhost:5432/testdb' || '' }}
+          SPRING_DATASOURCE_USERNAME: ${{ inputs.needs-database && 'testuser' || '' }}
+          SPRING_DATASOURCE_PASSWORD: ${{ inputs.needs-database && 'testpass' || '' }}
+
+      # ── Coverage Report ───────────────────────────────────────────────────
+      - name: Upload JaCoCo coverage report
+        if: always() # upload even if tests fail — useful for debugging
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ inputs.service-name }}
+          path: ${{ inputs.service-dir }}/target/site/jacoco/
+          retention-days: 7
+
+      # ── CodeQL Analysis ───────────────────────────────────────────────────
+      # Uploads SARIF to GitHub Security tab automatically.
+      - name: CodeQL — Analyze
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:java
+
+      # ── Semgrep SAST ──────────────────────────────────────────────────────
+      # continue-on-error: true keeps the PR unblocked while the team
+      # reviews findings. Flip to false when you want hard enforcement.
+      - name: Semgrep SAST (java · owasp-top-ten · spring-boot)
+        uses: semgrep/semgrep-action@v1
+        continue-on-error: true
+        with:
+          config: >-
+            p/java
+            p/owasp-top-ten
+            p/spring-boot
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+
+      # ── OWASP Dependency Check ────────────────────────────────────────────
+      # Scans Maven dependencies against NVD CVE database.
+      # Set NVD_API_KEY secret for 10x faster sync (free key at nvd.nist.gov).
+      # Currently non-blocking (continue-on-error: true).
+      # TIP: Move this to a nightly scheduled workflow to keep PRs fast.
+      - name: Cache OWASP NVD database
+        uses: actions/cache@v4
+        with:
+          path: ~/.owasp/dependency-check-data
+          key: owasp-nvd-${{ runner.os }}-${{ hashFiles(format('{0}/pom.xml', inputs.service-dir)) }}
+          restore-keys: owasp-nvd-${{ runner.os }}-
+
+      - name: OWASP Dependency Check (CVSS ≥ 7.0 — advisory, non-blocking)
+        continue-on-error: true
+        run: |
+          cd ${{ inputs.service-dir }}
+          mvn org.owasp:dependency-check-maven:check \
+            -DfailBuildOnCVSS=7 \
+            -DenableRetired=true \
+            -DnvdApiKey=${{ secrets.NVD_API_KEY }} \
+            -DnvdApiDelay=1000 \
+            -DdataDirectory=$HOME/.owasp/dependency-check-data \
+            -Dformat=HTML \
+            --no-transfer-progress
+
+      - name: Upload Dependency Check report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: depcheck-${{ inputs.service-name }}
+          path: ${{ inputs.service-dir }}/target/dependency-check-report.html
+          retention-days: 7

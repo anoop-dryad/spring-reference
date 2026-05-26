@@ -1,0 +1,31 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# CI — auth-service PR Check
+#
+# This is the per-service caller. Copy this file for each microservice,
+# changing service-name and service-dir. Everything else stays the same.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: CI — auth-service
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - "auth-service/**"
+      - ".github/workflows/ci-auth-service.yml"
+  push:
+    branches: ["feat/**", "fix/**"]
+    paths:
+      - "auth-service/**"
+
+jobs:
+  pr-check:
+    uses: ./.github/workflows/reusable-java-pr-check.yml
+    with:
+      service-name: auth-service
+      service-dir: auth-service
+      java-version: "21"
+      needs-database: true # set false if this service has no DB dependency
+    secrets:
+      SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+      NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
