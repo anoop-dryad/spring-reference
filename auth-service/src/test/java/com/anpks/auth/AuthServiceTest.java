@@ -18,6 +18,7 @@ class AuthServiceTest {
     private JwtUtil jwtUtil;
 
 	@BeforeEach
+    @SuppressWarnings("unused")
     void setUp() {
         jwtUtil = new JwtUtil();
         ReflectionTestUtils.setField(jwtUtil, "jwtSecret", TEST_SECRET);
