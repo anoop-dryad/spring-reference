@@ -24,7 +24,7 @@ import lombok.RequiredArgsConstructor;
 @RestController
 @RequestMapping("/api/auth")
 @RequiredArgsConstructor
-@Tag(name = "Authentication", description = "Register, Login, Validate")
+@Tag(name = "Authentication", description = "Register, Login, Validate, Health Check")
 public class AuthController {
 
     private final AuthService authService;
