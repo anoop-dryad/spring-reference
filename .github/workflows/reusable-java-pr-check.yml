@@ -35,6 +35,12 @@ on:
         required: false
         type: boolean
         default: false
+    secrets:
+      SEMGREP_APP_TOKEN:
+        required: false
+      NVD_API_KEY:
+        description: "NIST NVD API key — higher rate limits for OWASP NVD sync"
+        required: false
 
 jobs:
   pr-check:

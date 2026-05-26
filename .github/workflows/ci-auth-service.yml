@@ -14,12 +14,17 @@ on:
       - "auth-service/**"
       - ".github/workflows/ci-auth-service.yml"
   push:
-    branches: ["feat/**", "fix/**"]
+    branches: ["feature/**", "fix/**"]
     paths:
       - "auth-service/**"
 
 jobs:
   pr-check:
+    permissions:
+      contents: read
+      pull-requests: read
+      security-events: write # for CodeQL SARIF upload
+      actions: read
     uses: ./.github/workflows/reusable-java-pr-check.yml
     with:
       service-name: auth-service

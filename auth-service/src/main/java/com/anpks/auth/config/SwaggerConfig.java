@@ -16,7 +16,7 @@ public class SwaggerConfig {
         return new OpenAPI()
                 .info(new Info()
                         .title("Spring Boot Reference Project")
-                        .description("Production-ready Spring Boot Reference project with JWT Authentication")
+                        .description("Production-Ready Spring Boot Reference project with JWT Authentication")
                         .version("1.0.0")
                 )
                 .addSecurityItem(new SecurityRequirement().addList("Bearer Auth"))
