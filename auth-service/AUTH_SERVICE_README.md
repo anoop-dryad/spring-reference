@@ -1,3 +1,34 @@
+<h1 align="center">
+  <img src="https://raw.githubusercontent.com/devicons/devicon/master/icons/spring/spring-original.svg" 
+       width="45"
+       style="vertical-align: middle; margin-right: 10px;" />
+  <span style="vertical-align: middle;">
+    SPRING BOOT REFERENCE PROJECT
+  </span>
+</h1>
+
+<h3 align="center">
+A Production Ready JWT-based authentication service built with Spring Boot 4, PostgreSQL, and Flyway.
+Secure • Scalable • Clean • Environment-Aware • Simple
+</h3>
+
+<p align="center">
+Stop rewriting authentication, security, and configuration logic in every new project.  
+Start with a solid, production-grade backend foundation. A modern backend foundation with JWT, CI/CD, Docker, Makefile.  
+so you never start from scratch again.
+</p>
+<p align="center">
+
+<img src="https://img.shields.io/github/last-commit/yuosef33/Spring-boot-starter-template?color=blue&style=flat" />
+<img src="https://img.shields.io/github/languages/top/yuosef33/Spring-boot-starter-template?style=flat" />
+<img src="https://img.shields.io/github/languages/count/yuosef33/Spring-boot-starter-template?style=flat" />
+<img src="https://img.shields.io/badge/Java-21-red?style=flat&logo=openjdk" />
+<img src="https://img.shields.io/badge/Spring%20Boot-4.x-brightgreen?style=flat&logo=springboot" />
+</p>
+
+---
+
+
 # Auth Service
 
 JWT-based authentication service built with Spring Boot 4, PostgreSQL, and Flyway.
@@ -15,6 +46,9 @@ JWT-based authentication service built with Spring Boot 4, PostgreSQL, and Flywa
 | JJWT 0.13 | JWT token generation & validation |
 | SpringDoc OpenAPI 3 | API documentation |
 | Docker | Containerization |
+| Docker Hub | Container registry |
+| Kubernetes (minikube → EKS) | Orchestration |
+| GitHub Actions | CI/CD |
 
 ---
 
@@ -25,6 +59,7 @@ JWT-based authentication service built with Spring Boot 4, PostgreSQL, and Flywa
 - PostgreSQL 16+
 - Docker Desktop
 - [direnv](https://direnv.net/) (`brew install direnv`)
+- minikube + kubectl (for cluster deploys)
 
 ---
 
@@ -202,9 +237,219 @@ make docker-stop    # stop and remove container
 ### Dockerfile Highlights
 
 - Base image: `eclipse-temurin:21-jre-alpine` (~180MB)
+- Multi-stage build with Spring Boot layer extraction for fast rebuilds
 - Runs as a non-root system user for security
 - Uses `/dev/urandom` entropy source to prevent startup hangs
 - Healthcheck via `/actuator/health`
+- `exec` entrypoint so the JVM is PID 1 (clean SIGTERM handling for Kubernetes)
+
+---
+
+## Deploying to Minikube
+
+For local Kubernetes development the service runs in minikube. AWS EKS is the target for staging/prod (see [CI/CD Pipeline](#cicd-pipeline)).
+
+### One-time minikube setup
+
+```bash
+# Start minikube with enough resources for Spring Boot + Postgres
+minikube start --cpus=4 --memory=8192 --driver=docker
+
+# Enable required addons
+minikube addons enable ingress
+minikube addons enable metrics-server
+```
+
+### Deploying the service
+
+**Option A — Build directly into minikube (no registry round-trip)**
+
+```bash
+# Point your shell's docker at minikube's daemon
+eval $(minikube docker-env)
+
+# Build — the image lands inside minikube, not on your host
+make docker-build
+
+# Apply manifests
+kubectl apply -f k8s/dev/
+```
+
+The Deployment uses `imagePullPolicy: Never` so Kubernetes uses the locally-built image rather than pulling from Docker Hub. Fastest iteration loop for local work.
+
+**Option B — Pull from Docker Hub**
+
+```bash
+# Image must already be pushed (CD does this automatically on main merges)
+kubectl apply -f k8s/dev/
+```
+
+Use this path when you want to verify the exact image that CI/CD produced, or when collaborating with someone who doesn't have your local source checkout.
+
+### Creating secrets in the cluster
+
+For local minikube, generate Kubernetes Secrets from your `.env`:
+
+```bash
+kubectl create namespace auth-service
+kubectl create secret generic auth-service-secrets \
+  --from-env-file=.env \
+  --namespace=auth-service
+```
+
+For staging/prod (later, on EKS), secrets are sourced from AWS Secrets Manager via the Secrets Store CSI driver — the Deployment manifests stay the same.
+
+### Accessing the service
+
+```bash
+# Port-forward to localhost
+kubectl port-forward -n auth-service svc/auth-service 8081:8081
+
+# Or expose via minikube
+minikube service auth-service -n auth-service
+```
+
+### Useful commands
+
+```bash
+# Watch pod status
+kubectl get pods -n auth-service -w
+
+# Tail logs
+kubectl logs -n auth-service -l app=auth-service --tail=100 -f
+
+# Describe a failing pod
+kubectl describe pod -n auth-service <pod-name>
+
+# Shell into a running container
+kubectl exec -it -n auth-service <pod-name> -- sh
+
+# Check rollout status after deploy
+kubectl rollout status -n auth-service deployment/auth-service
+```
+
+---
+
+## CI/CD Pipeline
+
+CI and CD are split into separate workflows using **GitHub Actions**. PR validation runs on every pull request; deployments fire on merge to `main` (auto-dev) and on manual dispatch (staging/prod).
+
+### Workflow files
+
+| File | Purpose | Trigger |
+|---|---|---|
+| `.github/workflows/ci-auth-service.yml` | PR validation (build, test, lint) | PRs touching `auth-service/**` |
+| `.github/workflows/cd-auth-service.yml` | Build image and deploy | `main` merge (auto-dev), `workflow_dispatch` (staging/prod) |
+| `.github/workflows/reusable-java-pr-check.yml` | Shared PR-check logic | Called by CI workflows |
+| `.github/workflows/reusable-java-cd.yml` | Shared CD logic | Called by CD workflows |
+
+### CI flow (every PR)
+
+1. Checkout the branch
+2. Set up JDK 21 with Maven dependency cache
+3. Compile the project
+4. Run unit and integration tests (Testcontainers brings up Postgres)
+5. Generate JaCoCo coverage report
+6. Upload artifacts — test results, coverage, scan reports
+
+Security scans (OWASP Dependency-Check, Semgrep) can be re-enabled when ready — they're currently disabled in the reusable PR-check workflow.
+
+### CD flow (merge to main)
+
+```
+main merge (auth-service/** changed)
+        ↓
+build JAR (Maven)
+        ↓
+build multi-arch Docker image (linux/amd64 + linux/arm64)
+        ↓
+push to Docker Hub
+        ↓
+kubectl apply to dev cluster
+        ↓
+verify rollout (kubectl rollout status)
+```
+
+### Promotion model
+
+| Environment | Trigger | Approval |
+|---|---|---|
+| **dev** | Auto on merge to `main` | None |
+| **staging** | Manual via `workflow_dispatch` | None |
+| **prod** | Manual via `workflow_dispatch` | GitHub Environment approval required |
+
+Production deploys are gated by a GitHub Environment with required reviewers — the deploy job pauses until a designated approver clicks "Approve."
+
+### Docker Hub configuration
+
+Images are published to Docker Hub:
+
+```
+docker.io/<dockerhub-org>/auth-service:<tag>
+```
+
+**Tagging strategy:**
+
+| Tag | When applied |
+|---|---|
+| `latest` | Latest successful build from `main` |
+| `<git-sha>` | Every build — immutable, used for promotion between envs |
+| `<semver>` | Tagged releases (e.g., `1.4.2`) |
+| `dev` / `staging` / `prod` | Floating tags pointing to whatever's currently deployed per environment |
+
+**Promotion between environments uses the immutable SHA tag**, never `latest`. This guarantees that what's tested in staging is byte-identical to what's deployed to prod.
+
+### Required GitHub Secrets
+
+Configured at **Repo Settings → Secrets and variables → Actions**:
+
+| Secret | Used by | Description |
+|---|---|---|
+| `DOCKERHUB_USERNAME` | CD | Docker Hub account/org name |
+| `DOCKERHUB_TOKEN` | CD | Docker Hub access token (not password) |
+| `KUBECONFIG_DEV` | CD | Base64-encoded kubeconfig for dev cluster |
+| `KUBECONFIG_STAGING` | CD | Base64-encoded kubeconfig for staging cluster |
+| `KUBECONFIG_PROD` | CD | Base64-encoded kubeconfig for prod cluster |
+
+Generate a Docker Hub token at `hub.docker.com → Account Settings → Security → New Access Token`. Use scoped read/write permissions — never the account password.
+
+Encode a kubeconfig for use as a secret:
+
+```bash
+cat ~/.kube/config | base64 | pbcopy   # macOS
+cat ~/.kube/config | base64 -w 0       # Linux
+```
+
+### Manually triggering a deploy
+
+From the GitHub UI: **Actions → CD — auth-service → Run workflow**, then pick the environment and optionally a specific image tag.
+
+From the CLI:
+
+```bash
+gh workflow run "CD — auth-service" \
+  -f environment=staging \
+  -f image-tag=abc1234
+```
+
+### Why CD might not trigger on merge
+
+The CD workflow has a `paths:` filter — only changes under `auth-service/**` trigger an auto-deploy. README updates, workflow edits, and other non-code changes won't redeploy the service. Use `workflow_dispatch` if you need to force a deploy without a code change.
+
+### Rolling back
+
+```bash
+# View deployment history
+kubectl rollout history -n auth-service deployment/auth-service
+
+# Roll back to previous revision
+kubectl rollout undo -n auth-service deployment/auth-service
+
+# Or deploy a specific older SHA
+gh workflow run "CD — auth-service" \
+  -f environment=prod \
+  -f image-tag=<previous-good-sha>
+```
 
 ---
 
@@ -233,3 +478,15 @@ Make sure `SWAGGER_ENABLED=true` is set and you're hitting the right port (`8081
 
 **App hangs on startup in Docker**
 The `/dev/urandom` flag in the Dockerfile should prevent this. If still occurring, check your Docker resource limits.
+
+**Pod stuck in `ImagePullBackOff` on minikube**
+Did you `eval $(minikube docker-env)` before building? Without it, the image goes to your host's Docker daemon rather than minikube's, and Kubernetes inside minikube can't find it.
+
+**Pod crash-loops with `OutOfMemoryError`**
+Heap is sized as a percentage of the container memory limit (`-XX:MaxRAMPercentage=75.0`). If the Deployment's `resources.limits.memory` is too low, the heap is too small. Bump the limit or lower the percentage.
+
+**CD workflow didn't trigger on merge**
+The `paths:` filter only auto-deploys when files under `auth-service/**` change. Doc-only or workflow-only PRs are skipped by design — use `workflow_dispatch` to deploy without a code change.
+
+**JWT validation fails between services**
+`JWT_SECRET` must be at least 256 bits (32+ chars) and **identical** across the issuer (this service) and any downstream service validating the token. A mismatch produces opaque `SignatureException` errors.
