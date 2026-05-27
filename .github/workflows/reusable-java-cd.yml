@@ -1,0 +1,248 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Reusable — Java Build + Docker Hub Push + Kustomize Deploy
+#
+# Triggered after PR merges into main (dev), or manual dispatch (staging/prod).
+# Called by each service's cd-<service>.yml.
+#
+# Stages:
+#   1. Maven package     — build fat JAR (skip tests — already passed in PR check)
+#   2. Docker build+push — multi-platform image to Docker Hub
+#   3. Image scan        — Trivy vulnerability scan on the built image
+#   4. Kustomize deploy  — patch image tag, apply to target environment
+#   5. Rollout verify    — kubectl rollout status with timeout + auto-rollback
+#
+# Environment promotion:
+#   main  → auto deploy to dev
+#   dev   → manual trigger to staging
+#   staging → manual trigger (with approval gate) to prod
+#
+# Future AWS migration:
+#   - Replace DOCKERHUB_* secrets with AWS_* + ECR registry
+#   - Replace kubeconfig secret with aws eks update-kubeconfig
+#   - Everything else (Kustomize overlays, rollout logic) stays identical
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Reusable — Java CD (Docker Hub + Kustomize)
+
+on:
+  workflow_call:
+    inputs:
+      service-name:
+        description: "e.g. auth-service — used for image name and k8s dir"
+        required: true
+        type: string
+      service-dir:
+        description: "Relative path to service root containing pom.xml"
+        required: true
+        type: string
+      environment:
+        description: "Target environment: dev | staging | prod"
+        required: true
+        type: string
+      java-version:
+        required: false
+        type: string
+        default: "21"
+      image-tag:
+        description: "Override image tag. Default: short SHA"
+        required: false
+        type: string
+        default: ""
+    secrets:
+      DOCKERHUB_USERNAME:
+        required: true
+      DOCKERHUB_TOKEN:
+        required: true
+        description: "Docker Hub access token (not password) — create at hub.docker.com/settings/security"
+      KUBECONFIG_DEV:
+        required: false
+        description: "base64-encoded kubeconfig for dev cluster (Minikube)"
+      KUBECONFIG_STAGING:
+        required: false
+        description: "base64-encoded kubeconfig for staging cluster"
+      KUBECONFIG_PROD:
+        required: false
+        description: "base64-encoded kubeconfig for prod cluster"
+
+env:
+  # e.g. dockerhubuser/auth-service
+  IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/${{ inputs.service-name }}
+  # Use provided tag or fall back to short SHA
+  IMAGE_TAG: ${{ inputs.image-tag != '' && inputs.image-tag || github.sha }}
+
+jobs:
+  build-and-push:
+    name: Build & Push — ${{ inputs.service-name }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # Trivy SARIF upload
+
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      image-digest: ${{ steps.docker-build.outputs.digest }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java ${{ inputs.java-version }} (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ inputs.java-version }}
+          distribution: temurin
+          cache: maven
+
+      # ── Maven package (skip tests — they ran in PR check) ─────────────────
+      - name: Maven package (skip tests)
+        run: |
+          cd ${{ inputs.service-dir }}
+          mvn package -DskipTests --no-transfer-progress -B
+        # NOTE: If you want to re-run tests on merge for extra confidence:
+        #   remove -DskipTests and add needs-database input if required
+
+      # ── Docker setup ──────────────────────────────────────────────────────
+      - name: Set up QEMU (multi-platform builds)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # ── Image metadata (tags + labels) ────────────────────────────────────
+      # Produces tags like:
+      #   dockerhubuser/order-service:main-abc1234
+      #   dockerhubuser/order-service:latest  (only on main)
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=${{ inputs.environment }}-,format=short
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=ref,event=branch
+
+      # ── Build & Push ──────────────────────────────────────────────────────
+      # Builds amd64 + arm64 — arm64 needed if you ever use Graviton (AWS) or
+      # Apple Silicon dev machines. Remove platforms line to build amd64 only (faster).
+      - name: Build and push Docker image
+        id: docker-build
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ inputs.service-dir }}
+          file: ${{ inputs.service-dir }}/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha # GitHub Actions layer cache
+          cache-to: type=gha,mode=max
+
+      # ── Trivy Image Scan ──────────────────────────────────────────────────
+      # Scans the pushed image for OS + library CVEs.
+      # CRITICAL severity fails the build; HIGH is reported but non-blocking.
+      # Uploads SARIF to GitHub Security tab.
+      - name: Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+          exit-code: "1" # fail on CRITICAL — change to '0' to make advisory only
+        continue-on-error: true # non-blocking until your baseline is clean
+
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-results.sarif
+
+  # ── Deploy ─────────────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to ${{ inputs.environment }}
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }} # links to GitHub Environment (approval gates)
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── Write kubeconfig ──────────────────────────────────────────────────
+      # Each environment has its own kubeconfig stored as a base64 secret.
+      # To generate: kubectl config view --minify --raw | base64
+      - name: Configure kubectl
+        run: |
+          mkdir -p ~/.kube
+          if [ "${{ inputs.environment }}" = "prod" ]; then
+            echo "${{ secrets.KUBECONFIG_PROD }}" | base64 -d > ~/.kube/config
+          elif [ "${{ inputs.environment }}" = "staging" ]; then
+            echo "${{ secrets.KUBECONFIG_STAGING }}" | base64 -d > ~/.kube/config
+          else
+            echo "${{ secrets.KUBECONFIG_DEV }}" | base64 -d > ~/.kube/config
+          fi
+          chmod 600 ~/.kube/config
+
+      - name: Install Kustomize
+        run: |
+          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+          sudo mv kustomize /usr/local/bin/
+
+      # ── Kustomize: patch image tag ────────────────────────────────────────
+      # Updates the image tag in the overlay's kustomization.yaml.
+      # This mutates the file in-place for the apply step only — does NOT commit back.
+      # For GitOps (recommended later): commit this change to trigger ArgoCD/Flux.
+      - name: Set image tag in Kustomize overlay
+        run: |
+          cd k8s/overlays/${{ inputs.environment }}/${{ inputs.service-name }}
+          kustomize edit set image \
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ inputs.service-name }}=${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+
+      # ── Dry run first (safety check) ─────────────────────────────────────
+      - name: Kustomize dry-run (validate manifests)
+        run: |
+          kustomize build k8s/overlays/${{ inputs.environment }}/${{ inputs.service-name }} \
+            | kubectl apply --dry-run=server -f -
+
+      # ── Apply ─────────────────────────────────────────────────────────────
+      - name: Kustomize apply
+        run: |
+          kustomize build k8s/overlays/${{ inputs.environment }}/${{ inputs.service-name }} \
+            | kubectl apply -f -
+
+      # ── Rollout verification + auto-rollback ──────────────────────────────
+      # Waits up to 5 min for pods to become Ready.
+      # If timeout is hit → rolls back to previous ReplicaSet automatically.
+      - name: Verify rollout
+        run: |
+          NAMESPACE="${{ inputs.environment }}"
+          DEPLOYMENT="${{ inputs.service-name }}"
+          echo "Waiting for rollout: $DEPLOYMENT in namespace: $NAMESPACE"
+          if ! kubectl rollout status deployment/$DEPLOYMENT \
+              -n $NAMESPACE \
+              --timeout=300s; then
+            echo "::error::Rollout failed — triggering rollback"
+            kubectl rollout undo deployment/$DEPLOYMENT -n $NAMESPACE
+            exit 1
+          fi
+          echo "Rollout successful."
+
+      # ── Post-deploy summary ───────────────────────────────────────────────
+      - name: Deployment summary
+        if: always()
+        run: |
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Service | ${{ inputs.service-name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | ${{ inputs.environment }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Image | ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit | ${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Triggered by | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY

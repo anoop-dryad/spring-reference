@@ -1,0 +1,64 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# CD — auth-service Deploy
+#
+# Environment promotion model:
+#   main merge → auto deploy to dev
+#   workflow_dispatch (environment=staging) → manual promote to staging
+#   workflow_dispatch (environment=prod)    → requires GitHub Environment approval
+#
+# Copy this file per service, changing service-name and service-dir.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: CD — auth-service
+
+on:
+  # Auto-deploy to dev on every merge to main
+  push:
+    branches: [main]
+    paths:
+      - "auth-service/**"
+
+  # Manual promotion to staging or prod
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options:
+          - staging
+          - prod
+      image-tag:
+        description: "Image tag to deploy (default: latest main SHA)"
+        required: false
+        type: string
+
+jobs:
+  # ── Dev: auto on merge to main ──────────────────────────────────────────
+  deploy-dev:
+    if: github.event_name == 'push'
+    uses: ./.github/workflows/reusable-java-cd.yml
+    with:
+      service-name: auth-service
+      service-dir: auth-service
+      environment: dev
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      KUBECONFIG_DEV: ${{ secrets.KUBECONFIG_DEV }}
+
+  # ── Staging / Prod: manual dispatch ────────────────────────────────────
+  deploy-manual:
+    if: github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/reusable-java-cd.yml
+    with:
+      service-name: auth-service
+      service-dir: auth-service
+      environment: ${{ inputs.environment }}
+      image-tag: ${{ inputs.image-tag }}
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      KUBECONFIG_DEV: ${{ secrets.KUBECONFIG_DEV }}
+      KUBECONFIG_STAGING: ${{ secrets.KUBECONFIG_STAGING }}
+      KUBECONFIG_PROD: ${{ secrets.KUBECONFIG_PROD }}
