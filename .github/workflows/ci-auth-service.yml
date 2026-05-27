@@ -12,7 +12,7 @@ on:
     branches: [main, develop]
     paths:
       - "auth-service/**"
-      - ".github/workflows/ci-auth-service.yml"
+      - ".github/workflows/**"
   push:
     branches: ["feature/**", "fix/**"]
     paths:
