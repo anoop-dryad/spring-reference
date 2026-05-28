@@ -15,7 +15,8 @@ updates:
   - package-ecosystem: maven
     directory: "/auth-service"
     schedule:
-      interval: daily
+      interval: weekly
+      day: sunday
     open-pull-requests-limit: 10
     labels:
       - dependencies
@@ -45,6 +46,7 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
+      day: sunday
     labels:
       - dependencies
       - github-actions
@@ -55,6 +57,7 @@ updates:
     directory: "/auth-service"
     schedule:
       interval: weekly
+      day: sunday
     labels:
       - dependencies
       - docker
