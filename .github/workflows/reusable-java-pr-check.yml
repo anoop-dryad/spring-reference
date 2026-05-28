@@ -98,7 +98,7 @@ jobs:
         # No fetch-depth: 0 needed here — only CodeQL needs full history.
 
       - name: Setup Java ${{ inputs.java-version }} (Temurin)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           java-version: ${{ inputs.java-version }}
           distribution: temurin
@@ -180,7 +180,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Java ${{ inputs.java-version }} (Temurin)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           java-version: ${{ inputs.java-version }}
           distribution: temurin
