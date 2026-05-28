@@ -190,7 +190,7 @@ jobs:
       # build-mode: manual = "I'll build it myself; trace what I compile."
       # The alternative (autobuild) is simpler but slower and less predictable.
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: java-kotlin # modern identifier; 'java' is legacy
           queries: security-extended # broader than default; adds CWE rules
@@ -203,7 +203,7 @@ jobs:
 
       - name: CodeQL — Analyze
         id: codeql
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
         with:
           category: /language:java-kotlin
           # Upload SARIF even on findings; the Security tab is the source of truth.
