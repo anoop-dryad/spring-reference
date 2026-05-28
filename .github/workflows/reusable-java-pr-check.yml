@@ -128,7 +128,7 @@ jobs:
       # ── Test reports — uploaded even on failure for debugging ──────────────
       - name: Upload Surefire test reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: tests-${{ inputs.service-name }}
           path: ${{ inputs.service-dir }}/target/surefire-reports/
@@ -137,7 +137,7 @@ jobs:
 
       - name: Upload JaCoCo coverage report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-${{ inputs.service-name }}
           path: ${{ inputs.service-dir }}/target/site/jacoco/
