@@ -87,7 +87,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Java ${{ inputs.java-version }} (Temurin)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           java-version: ${{ inputs.java-version }}
           distribution: temurin
