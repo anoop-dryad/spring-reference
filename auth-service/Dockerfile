@@ -9,7 +9,7 @@
 
 # ── Stage 1: Build ────────────────────────────────────────────────────────────
 # Use an image that actually has Maven. eclipse-temurin:*-jdk has no mvn.
-FROM maven:3.9-eclipse-temurin-21 AS builder
+FROM maven:3-eclipse-temurin-26 AS builder
 
 WORKDIR /build
 
