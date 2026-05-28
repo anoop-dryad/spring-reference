@@ -94,7 +94,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         # No fetch-depth: 0 needed here — only CodeQL needs full history.
 
       - name: Setup Java ${{ inputs.java-version }} (Temurin)
@@ -174,7 +174,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           # CodeQL needs full history to compute the PR diff for analysis.
           fetch-depth: 0

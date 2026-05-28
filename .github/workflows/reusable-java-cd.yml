@@ -84,7 +84,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Java ${{ inputs.java-version }} (Temurin)
         uses: actions/setup-java@v4
@@ -173,7 +173,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # ── Write kubeconfig ──────────────────────────────────────────────────
       # Each environment has its own kubeconfig stored as a base64 secret.
