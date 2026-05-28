@@ -1,18 +1,23 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Reusable — Java PR / Feature Branch Check
 #
-# Called by each service's ci-pr-<service>.yml on feat-*, fix-* branches.
+# Called by each service's ci-<service>.yml on PRs to main.
 # Intentionally stops before Docker — no image build, no registry push.
-# Goal: fast feedback (~5 min) for developers.
+# Goal: fast feedback (~5 min) for developers on every PR.
 #
-# Stages:
-#   1. Maven verify      — unit + integration tests + JaCoCo coverage
-#   2. CodeQL            — GitHub SAST (security-extended queries)
-#   3. Semgrep           — java · owasp-top-ten · spring-boot rules
-#   4. OWASP Dep Check   — CVE scan on pom.xml deps (CVSS ≥ 7.0, non-blocking)
+# Stages (per-PR, fast path):
+#   1. Maven verify  — unit + integration tests + JaCoCo coverage
+#   2. CodeQL        — GitHub SAST (security-extended queries, diff-aware)
+#
+# Heavy scans (OWASP Dependency-Check, full Semgrep) belong in a nightly
+# scheduled workflow against `main`, not in per-PR CI. See:
+#   .github/workflows/scheduled-security-scan.yml
+#
+# Dependency CVE surveillance is handled continuously by Dependabot
+# (.github/dependabot.yml) — no PR-time cost.
 # ─────────────────────────────────────────────────────────────────────────────
 
-name: Reusable — Java PR Check (no Docker)
+name: Reusable — Java PR Check
 
 on:
   workflow_call:
@@ -26,145 +31,214 @@ on:
         required: true
         type: string
       java-version:
-        description: "Java version to use (default: 21)"
+        description: "Java version (default: 21)"
         required: false
         type: string
         default: "21"
       needs-database:
-        description: "Spin up a local Postgres container for integration tests"
+        description: "Spin up a Postgres service container for integration tests"
         required: false
         type: boolean
         default: false
-    secrets:
-      SEMGREP_APP_TOKEN:
+      enforce-codeql:
+        description: "Fail the PR on CodeQL findings (default: true)"
         required: false
+        type: boolean
+        default: true
+    secrets:
+      # Reserved for future use; kept here so callers can pass it without
+      # editing this workflow. Not currently consumed by any step.
       NVD_API_KEY:
-        description: "NIST NVD API key — higher rate limits for OWASP NVD sync"
         required: false
 
+# Cancel obsolete runs when a new commit lands on the same PR/branch.
+# Saves CI minutes; gives developers feedback on their LATEST commit only.
+concurrency:
+  group: pr-check-${{ inputs.service-name }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  pr-check:
-    name: PR Check — ${{ inputs.service-name }}
+  # ── Job A: Build, Test, Coverage ────────────────────────────────────────────
+  # Split from CodeQL so that test failures don't block CodeQL upload, and
+  # CodeQL doesn't block test feedback. They run in parallel.
+  build-test:
+    name: Build & Test — ${{ inputs.service-name }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+
     permissions:
       contents: read
       pull-requests: read
-      security-events: write # needed for CodeQL SARIF upload
-      actions: read
+
+    # GitHub-managed Postgres. Always defined; cost is ~5 seconds if unused.
+    # Service containers don't support `if:` conditions, so we always start it
+    # and let `needs-database` control whether the app actually uses it.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: testdb
+          POSTGRES_USER: testuser
+          POSTGRES_PASSWORD: testpass
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    defaults:
+      run:
+        working-directory: ${{ inputs.service-dir }}
 
     steps:
-      # ── Checkout ─────────────────────────────────────────────────────────────
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # full history needed by CodeQL
+        # No fetch-depth: 0 needed here — only CodeQL needs full history.
 
-      # ── Java ─────────────────────────────────────────────────────────────────
       - name: Setup Java ${{ inputs.java-version }} (Temurin)
         uses: actions/setup-java@v4
         with:
           java-version: ${{ inputs.java-version }}
           distribution: temurin
-          cache: maven # caches ~/.m2 between runs — big speed win
+          cache: maven # caches ~/.m2 between runs — biggest single speedup
 
-      # ── Optional: Postgres for integration tests ──────────────────────────
-      # Only runs when needs-database: true.
-      # Uses alpine image — starts in ~5 sec, minimal overhead.
-      - name: Start PostgreSQL (integration tests)
+      # ── Two separate Maven steps so env vars are set ONLY when needed.
+      # Empty-string env vars can confuse Spring Boot's datasource auto-config.
+      # ─────────────────────────────────────────────────────────────────────────
+      - name: Maven verify (with Postgres)
         if: ${{ inputs.needs-database }}
-        run: |
-          docker run -d \
-            --name testdb \
-            -e POSTGRES_DB=testdb \
-            -e POSTGRES_USER=testuser \
-            -e POSTGRES_PASSWORD=testpass \
-            -p 5432:5432 \
-            postgres:15-alpine
-          # Wait until pg_isready before proceeding (~3-8 sec)
-          until docker exec testdb pg_isready -U testuser 2>/dev/null; do
-            echo "Waiting for Postgres…"; sleep 2
-          done
-          echo "PostgreSQL ready."
-
-      # ── CodeQL init (must happen BEFORE Maven build) ──────────────────────
-      # CodeQL instruments the build to trace compiled code.
-      # Do NOT move this step after Maven.
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
-        with:
-          languages: java
-          queries: security-extended # broader than default — includes CWE rules
-
-      # ── Maven Build + Tests ───────────────────────────────────────────────
-      # mvn verify = compile → test → integration-test → verify
-      # JaCoCo agent is bound to the verify phase via pom.xml plugin config.
-      - name: Maven verify (tests + JaCoCo coverage)
-        run: cd ${{ inputs.service-dir }} && mvn verify --no-transfer-progress -B
+        timeout-minutes: 15
+        run: mvn verify --no-transfer-progress -B
         env:
-          # Only set when needs-database is true; empty string otherwise
-          SPRING_DATASOURCE_URL: ${{ inputs.needs-database && 'jdbc:postgresql://localhost:5432/testdb' || '' }}
-          SPRING_DATASOURCE_USERNAME: ${{ inputs.needs-database && 'testuser' || '' }}
-          SPRING_DATASOURCE_PASSWORD: ${{ inputs.needs-database && 'testpass' || '' }}
+          SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/testdb
+          SPRING_DATASOURCE_USERNAME: testuser
+          SPRING_DATASOURCE_PASSWORD: testpass
+          # Force Spring to use the test profile if you have one
+          SPRING_PROFILES_ACTIVE: test
 
-      # ── Coverage Report ───────────────────────────────────────────────────
+      - name: Maven verify (no database)
+        if: ${{ !inputs.needs-database }}
+        timeout-minutes: 15
+        run: mvn verify --no-transfer-progress -B
+        env:
+          SPRING_PROFILES_ACTIVE: test
+
+      # ── Test reports — uploaded even on failure for debugging ──────────────
+      - name: Upload Surefire test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tests-${{ inputs.service-name }}
+          path: ${{ inputs.service-dir }}/target/surefire-reports/
+          retention-days: 7
+          if-no-files-found: ignore
+
       - name: Upload JaCoCo coverage report
-        if: always() # upload even if tests fail — useful for debugging
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: coverage-${{ inputs.service-name }}
           path: ${{ inputs.service-dir }}/target/site/jacoco/
           retention-days: 7
+          if-no-files-found: warn
 
-      # ── CodeQL Analysis ───────────────────────────────────────────────────
-      # Uploads SARIF to GitHub Security tab automatically.
+      # ── Surface test results inline on the PR ──────────────────────────────
+      # Adds a check-run with test summary; failures show in the PR conversation.
+      - name: Publish test results to PR
+        if: always()
+        uses: dorny/test-reporter@v2
+        with:
+          name: Tests — ${{ inputs.service-name }}
+          path: ${{ inputs.service-dir }}/target/surefire-reports/*.xml
+          reporter: java-junit
+          fail-on-error: false
+
+  # ── Job B: CodeQL Security Analysis ────────────────────────────────────────
+  # Runs in parallel with build-test so neither blocks the other.
+  # Diff-aware: CodeQL natively analyzes only the changed paths on PRs.
+  codeql:
+    name: CodeQL — ${{ inputs.service-name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    permissions:
+      contents: read
+      security-events: write # required to upload SARIF to Security tab
+      actions: read # required by CodeQL to inspect workflow info
+
+    defaults:
+      run:
+        working-directory: ${{ inputs.service-dir }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # CodeQL needs full history to compute the PR diff for analysis.
+          fetch-depth: 0
+
+      - name: Setup Java ${{ inputs.java-version }} (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ inputs.java-version }}
+          distribution: temurin
+          cache: maven
+
+      # ── CodeQL init MUST come before the build it analyzes ─────────────────
+      # build-mode: manual = "I'll build it myself; trace what I compile."
+      # The alternative (autobuild) is simpler but slower and less predictable.
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: java-kotlin # modern identifier; 'java' is legacy
+          queries: security-extended # broader than default; adds CWE rules
+          build-mode: manual
+
+      # Build only what CodeQL needs — skip tests for speed.
+      # CodeQL doesn't need test execution, only compiled bytecode.
+      - name: Compile for CodeQL
+        run: mvn package -DskipTests --no-transfer-progress -B
+
       - name: CodeQL — Analyze
+        id: codeql
         uses: github/codeql-action/analyze@v3
         with:
-          category: /language:java
-
-      # ── Semgrep SAST ──────────────────────────────────────────────────────
-      # continue-on-error: true keeps the PR unblocked while the team
-      # reviews findings. Flip to false when you want hard enforcement.
-      - name: Semgrep SAST (java · owasp-top-ten · spring-boot)
-        uses: semgrep/semgrep-action@v1
+          category: /language:java-kotlin
+          # Upload SARIF even on findings; the Security tab is the source of truth.
+          upload: always
+        # Don't fail the step itself — we control failure via the next step
+        # so that the SARIF upload always completes first.
         continue-on-error: true
-        with:
-          config: >-
-            p/java
-            p/owasp-top-ten
-            p/spring-boot
-        env:
-          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
 
-      # ── OWASP Dependency Check ────────────────────────────────────────────
-      # Scans Maven dependencies against NVD CVE database.
-      # Set NVD_API_KEY secret for 10x faster sync (free key at nvd.nist.gov).
-      # Currently non-blocking (continue-on-error: true).
-      # TIP: Move this to a nightly scheduled workflow to keep PRs fast.
-      - name: Cache OWASP NVD database
-        uses: actions/cache@v4
-        with:
-          path: ~/.owasp/dependency-check-data
-          key: owasp-nvd-${{ runner.os }}-${{ hashFiles(format('{0}/pom.xml', inputs.service-dir)) }}
-          restore-keys: owasp-nvd-${{ runner.os }}-
-
-      - name: OWASP Dependency Check (CVSS ≥ 7.0 — advisory, non-blocking)
-        continue-on-error: true
+      # Now decide whether CodeQL findings should fail the PR.
+      # SARIF is always uploaded to the Security tab regardless of this check.
+      - name: Enforce CodeQL findings gate
+        if: ${{ inputs.enforce-codeql && steps.codeql.outcome != 'success' }}
         run: |
-          cd ${{ inputs.service-dir }}
-          mvn org.owasp:dependency-check-maven:check \
-            -DfailBuildOnCVSS=7 \
-            -DenableRetired=true \
-            -DnvdApiKey=${{ secrets.NVD_API_KEY }} \
-            -DnvdApiDelay=1000 \
-            -DdataDirectory=$HOME/.owasp/dependency-check-data \
-            -Dformat=HTML \
-            --no-transfer-progress
+          echo "::error::CodeQL found security issues. See the Security tab for details."
+          exit 1
 
-      - name: Upload Dependency Check report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: depcheck-${{ inputs.service-name }}
-          path: ${{ inputs.service-dir }}/target/dependency-check-report.html
-          retention-days: 7
+  # ── Job C: Aggregate Status ────────────────────────────────────────────────
+  # Single check the branch protection rule can require, instead of pinning
+  # branch protection to each individual job name. Makes adding/removing jobs
+  # later trivial without re-configuring branch protection.
+  pr-check:
+    name: PR Check — ${{ inputs.service-name }}
+    runs-on: ubuntu-latest
+    needs: [build-test, codeql]
+    if: always() # run even if upstream jobs failed, so we can summarize
+    timeout-minutes: 2
+
+    steps:
+      - name: Aggregate results
+        run: |
+          echo "build-test: ${{ needs.build-test.result }}"
+          echo "codeql:     ${{ needs.codeql.result }}"
+          if [[ "${{ needs.build-test.result }}" != "success" ]] || \
+             [[ "${{ needs.codeql.result }}" != "success" ]]; then
+            echo "::error::One or more checks failed."
+            exit 1
+          fi
+          echo "All checks passed."

@@ -334,6 +334,15 @@ kubectl rollout status -n auth-service deployment/auth-service
 
 CI and CD are split into separate workflows using **GitHub Actions**. PR validation runs on every pull request; deployments fire on merge to `main` (auto-dev) and on manual dispatch (staging/prod).
 
+```
+.github/
+├── dependabot.yml                              ← continuous dependency CVE watch
+└── workflows/
+    ├── ci-auth-service.yml                     ← per-service caller (PR trigger)
+    ├── reusable-java-pr-check.yml              ← shared PR-check logic (fast)
+    └── scheduled-security-scan.yml             ← nightly heavy scans (OWASP, full Semgrep)
+```
+
 ### Workflow files
 
 | File | Purpose | Trigger |

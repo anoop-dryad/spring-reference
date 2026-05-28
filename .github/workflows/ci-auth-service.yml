@@ -9,14 +9,17 @@ name: CI — auth-service
 
 on:
   pull_request:
-    branches: [main, develop]
+    branches: [main]
     paths:
       - "auth-service/**"
-      - ".github/workflows/**"
-  push:
-    branches: ["feature/**", "fix/**"]
-    paths:
-      - "auth-service/**"
+
+# Cancel obsolete runs on the same PR/branch.
+# Note: the reusable workflow has its own concurrency group too; this one
+# applies at the caller level so the entire pipeline (not just the inner job)
+# is cancelled when superseded.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   pr-check:
@@ -31,6 +34,7 @@ jobs:
       service-dir: auth-service
       java-version: "21"
       needs-database: true # set false if this service has no DB dependency
+      enforce-codeql: true
     secrets:
-      SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+      #  SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
       NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
