@@ -148,7 +148,7 @@ jobs:
       # Adds a check-run with test summary; failures show in the PR conversation.
       - name: Publish test results to PR
         if: always()
-        uses: dorny/test-reporter@v2
+        uses: dorny/test-reporter@v3
         with:
           name: Tests — ${{ inputs.service-name }}
           path: ${{ inputs.service-dir }}/target/surefire-reports/*.xml
