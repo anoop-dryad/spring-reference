@@ -1,12 +1,12 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Reusable — Java Build + Docker Hub Push + Kustomize Deploy
+# Reusable — Java Build + AWS ECR Push + Kustomize Deploy
 #
-# Triggered after PR merges into main (dev), or manual dispatch (staging/prod).
+# Triggered after PR merges into main (dev), or manual dispatch (dev/staging/prod).
 # Called by each service's cd-<service>.yml.
 #
 # Stages:
 #   1. Maven package     — build fat JAR (skip tests — already passed in PR check)
-#   2. Docker build+push — multi-platform image to Docker Hub
+#   2. Docker build+push — multi-platform image to AWS ECR Hub
 #   3. Image scan        — Trivy vulnerability scan on the built image
 #   4. Kustomize deploy  — patch image tag, apply to target environment
 #   5. Rollout verify    — kubectl rollout status with timeout + auto-rollback
@@ -16,13 +16,13 @@
 #   dev   → manual trigger to staging
 #   staging → manual trigger (with approval gate) to prod
 #
-# Future AWS migration:
-#   - Replace DOCKERHUB_* secrets with AWS_* + ECR registry
-#   - Replace kubeconfig secret with aws eks update-kubeconfig
-#   - Everything else (Kustomize overlays, rollout logic) stays identical
+# ECR Public Notes:
+#   - ECR Public login must use us-east-1 region (AWS requirement)
+#   - Public registry URI: public.ecr.aws/<alias>/<repo>
+#   - No cost for public image storage and pull
 # ─────────────────────────────────────────────────────────────────────────────
 
-name: Reusable — Java CD (Docker Hub + Kustomize)
+name: Reusable — Java CD (AWS ECR Public + Kustomize)
 
 on:
   workflow_call:
@@ -48,12 +48,17 @@ on:
         required: false
         type: string
         default: ""
+      ecr-registry:
+        description: "ECR Public registry URI e.g. public.ecr.aws/o6c1v8x2"
+        required: true
+        type: string
     secrets:
-      DOCKERHUB_USERNAME:
+      AWS_ACCESS_KEY_ID:
         required: true
-      DOCKERHUB_TOKEN:
+        description: "AWS Access Key ID — for ECR Public login"
+      AWS_SECRET_ACCESS_KEY:
         required: true
-        description: "Docker Hub access token (not password) — create at hub.docker.com/settings/security"
+        description: "AWS Secret Access Key — for ECR Public login"
       KUBECONFIG_DEV:
         required: false
         description: "base64-encoded kubeconfig for dev cluster (Minikube)"
@@ -65,8 +70,8 @@ on:
         description: "base64-encoded kubeconfig for prod cluster"
 
 env:
-  # e.g. dockerhubuser/auth-service
-  IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/${{ inputs.service-name }}
+  # e.g. public.ecr.aws/o6c1v8x2/auth-service
+  IMAGE_NAME: ${{ inputs.ecr-registry }}/${{ inputs.service-name }}
   # Use provided tag or fall back to short SHA
   IMAGE_TAG: ${{ inputs.image-tag != '' && inputs.image-tag || github.sha }}
 
@@ -108,16 +113,24 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: Login to Docker Hub
-        uses: docker/login-action@v4
+      # ── ECR Public Login ──────────────────────────────────────────────────
+      # ECR Public login MUST use us-east-1 regardless of your app region
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR Public
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          registry-type: public
 
       # ── Image metadata (tags + labels) ────────────────────────────────────
       # Produces tags like:
-      #   dockerhubuser/order-service:main-abc1234
-      #   dockerhubuser/order-service:latest  (only on main)
+      #   public.ecr.aws/o6c1v8x2/auth-service:dev-abc1234
+      #   public.ecr.aws/o6c1v8x2/auth-service:latest  (only on main)
       - name: Docker metadata
         id: meta
         uses: docker/metadata-action@v6
@@ -137,7 +150,7 @@ jobs:
         with:
           context: ${{ inputs.service-dir }}
           file: ${{ inputs.service-dir }}/Dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
