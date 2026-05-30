@@ -3,6 +3,7 @@
 #
 # Environment promotion model:
 #   main merge → auto deploy to dev
+#   workflow_dispatch (environment=dev) → manual promote to dev
 #   workflow_dispatch (environment=staging) → manual promote to staging
 #   workflow_dispatch (environment=prod)    → requires GitHub Environment approval
 #
@@ -48,9 +49,10 @@ jobs:
       service-name: auth-service
       service-dir: auth-service
       environment: dev
+      ecr-registry: public.ecr.aws/o6c1v8x2
     secrets:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       KUBECONFIG_DEV: ${{ secrets.KUBECONFIG_DEV }}
 
   # ── Staging / Prod: manual dispatch ────────────────────────────────────
@@ -67,9 +69,10 @@ jobs:
       service-dir: auth-service
       environment: ${{ inputs.environment }}
       image-tag: ${{ inputs.image-tag }}
+      ecr-registry: public.ecr.aws/o6c1v8x2
     secrets:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       KUBECONFIG_DEV: ${{ secrets.KUBECONFIG_DEV }}
       KUBECONFIG_STAGING: ${{ secrets.KUBECONFIG_STAGING }}
       KUBECONFIG_PROD: ${{ secrets.KUBECONFIG_PROD }}
