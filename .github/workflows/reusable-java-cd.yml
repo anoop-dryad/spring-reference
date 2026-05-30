@@ -172,7 +172,7 @@ jobs:
       - name: Trivy vulnerability scan
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          image-ref: ${{ env.IMAGE_NAME }}:latest #Trivy is using the full SHA as the tag, but the image was pushed with a short SHA tag. latest tag always exists after push
           format: sarif
           output: trivy-results.sarif
           severity: CRITICAL,HIGH
