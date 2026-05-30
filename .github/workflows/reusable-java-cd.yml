@@ -157,6 +157,14 @@ jobs:
           cache-from: type=gha # GitHub Actions layer cache
           cache-to: type=gha,mode=max
 
+      # ── Trivy Cache ───────────────────────────────────────────────────────
+      - name: Cache Trivy DB
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/trivy
+          key: cache-trivy-${{ github.run_id }}
+          restore-keys: cache-trivy-
+
       # ── Trivy Image Scan ──────────────────────────────────────────────────
       # Scans the pushed image for OS + library CVEs.
       # CRITICAL severity fails the build; HIGH is reported but non-blocking.
@@ -169,11 +177,12 @@ jobs:
           output: trivy-results.sarif
           severity: CRITICAL,HIGH
           exit-code: "1" # fail on CRITICAL — change to '0' to make advisory only
+          cache-dir: ~/.cache/trivy # ← use cached DB
         continue-on-error: true # non-blocking until your baseline is clean
 
       - name: Upload Trivy scan results
         uses: github/codeql-action/upload-sarif@v4
-        if: always()
+        if: always() && hashFiles('trivy-results.sarif') != '' # ← only if file exists
         with:
           sarif_file: trivy-results.sarif
 
