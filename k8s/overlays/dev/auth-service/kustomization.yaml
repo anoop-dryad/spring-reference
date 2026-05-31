@@ -24,22 +24,14 @@ namespace: auth-service
 resources:
   - ../../../base/auth-service
 
-# Inline ConfigMap changes for dev. Kustomize generates a new ConfigMap with
-# these values merged on top of the base's.
-configMapGenerator:
-  - name: auth-service-config
-    behavior: merge
-    files:
-      - application.yaml=application-dev.yaml
-
 # ── Secrets from env files (gitignored) ─────────────────────────────────────
 secretGenerator:
   - name: postgres-credentials
-    behavior: replace
+    behavior: create
     envs:
       - postgres.env
   - name: auth-service-secrets
-    behavior: replace
+    behavior: create
     envs:
       - auth.env
 

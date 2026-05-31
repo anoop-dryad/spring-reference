@@ -18,7 +18,6 @@ namespace: auth-service
 resources:
   - namespace.yaml
   - configmap.yaml
-  - secrets.yaml
   - postgres-service.yaml
   - postgres-statefulset.yaml
   - deployment.yaml
