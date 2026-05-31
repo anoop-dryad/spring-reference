@@ -1,0 +1,38 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# ConfigMap: auth-service-config
+#
+# Non-secret configuration. Injected as environment variables into the
+# auth-service pod. Spring Boot reads them via property resolution
+# (SERVER_PORT → server.port, etc.).
+#
+# Anything secret (passwords, JWT keys) belongs in Secrets, not here.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: auth-service-config
+  namespace: auth-service
+  labels:
+    app.kubernetes.io/name: auth-service
+    app.kubernetes.io/component: backend
+data:
+  # ── Server settings ──────────────────────────────────────────────────────
+  SERVER_PORT: "8081"
+  SPRING_PROFILES_ACTIVE: "dev"
+
+  # ── Database connection (non-secret parts) ───────────────────────────────
+  # The host uses Kubernetes service DNS: <service>.<namespace>.svc.cluster.local
+  # Within the same namespace, you can use just the service name (postgres).
+  DB_HOST: "postgres"
+  DB_PORT: "5432"
+  DB_NAME: "spring_ref_db"
+  DB_SCHEMA: "auth"
+
+  # ── Application behavior ─────────────────────────────────────────────────
+  LOG_LEVEL: "INFO"
+  JWT_ACCESS_TOKEN_TTL: "PT15M" # 15 minutes
+  JWT_REFRESH_TOKEN_TTL: "P7D" # 7 days
+
+  # ── Swagger UI ───────────────────────────────────────────────────────────
+  # Disabled by default; dev overlay enables it.
+  SWAGGER_ENABLED: "false"

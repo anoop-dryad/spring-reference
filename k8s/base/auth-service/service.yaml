@@ -1,0 +1,27 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Service: auth-service
+#
+# ClusterIP service — internal-only. The Ingress routes external traffic
+# from auth.local to this Service, which load-balances across the pod replicas.
+#
+# DNS within the cluster: auth-service.auth-service.svc.cluster.local
+# Or within the same namespace: auth-service
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-service
+  namespace: auth-service
+  labels:
+    app.kubernetes.io/name: auth-service
+    app.kubernetes.io/part-of: auth-service
+    app.kubernetes.io/component: backend
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8081
+      targetPort: http # references the named port from the Deployment
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: auth-service
