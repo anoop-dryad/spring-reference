@@ -186,85 +186,85 @@ jobs:
         with:
           sarif_file: trivy-results.sarif
 
-  # ── Deploy ─────────────────────────────────────────────────────────────────
-  deploy:
-    name: Deploy to ${{ inputs.environment }}
-    needs: build-and-push
-    runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }} # links to GitHub Environment (approval gates)
+  # # ── Deploy ─────────────────────────────────────────────────────────────────
+  # deploy:
+  #   name: Deploy to ${{ inputs.environment }}
+  #   needs: build-and-push
+  #   runs-on: ubuntu-latest
+  #   environment: ${{ inputs.environment }} # links to GitHub Environment (approval gates)
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v6
 
-      # ── Write kubeconfig ──────────────────────────────────────────────────
-      # Each environment has its own kubeconfig stored as a base64 secret.
-      # To generate: kubectl config view --minify --raw | base64
-      - name: Configure kubectl
-        run: |
-          mkdir -p ~/.kube
-          if [ "${{ inputs.environment }}" = "prod" ]; then
-            echo "${{ secrets.KUBECONFIG_PROD }}" | base64 -d > ~/.kube/config
-          elif [ "${{ inputs.environment }}" = "staging" ]; then
-            echo "${{ secrets.KUBECONFIG_STAGING }}" | base64 -d > ~/.kube/config
-          else
-            echo "${{ secrets.KUBECONFIG_DEV }}" | base64 -d > ~/.kube/config
-          fi
-          chmod 600 ~/.kube/config
+  #     # ── Write kubeconfig ──────────────────────────────────────────────────
+  #     # Each environment has its own kubeconfig stored as a base64 secret.
+  #     # To generate: kubectl config view --minify --raw | base64
+  #     - name: Configure kubectl
+  #       run: |
+  #         mkdir -p ~/.kube
+  #         if [ "${{ inputs.environment }}" = "prod" ]; then
+  #           echo "${{ secrets.KUBECONFIG_PROD }}" | base64 -d > ~/.kube/config
+  #         elif [ "${{ inputs.environment }}" = "staging" ]; then
+  #           echo "${{ secrets.KUBECONFIG_STAGING }}" | base64 -d > ~/.kube/config
+  #         else
+  #           echo "${{ secrets.KUBECONFIG_DEV }}" | base64 -d > ~/.kube/config
+  #         fi
+  #         chmod 600 ~/.kube/config
 
-      - name: Install Kustomize
-        run: |
-          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
-          sudo mv kustomize /usr/local/bin/
+  #     - name: Install Kustomize
+  #       run: |
+  #         curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+  #         sudo mv kustomize /usr/local/bin/
 
-      # ── Kustomize: patch image tag ────────────────────────────────────────
-      # Updates the image tag in the overlay's kustomization.yaml.
-      # This mutates the file in-place for the apply step only — does NOT commit back.
-      # For GitOps (recommended later): commit this change to trigger ArgoCD/Flux.
-      - name: Set image tag in Kustomize overlay
-        run: |
-          cd k8s/overlays/${{ inputs.environment }}/${{ inputs.service-name }}
-          kustomize edit set image \
-            ${{ secrets.DOCKERHUB_USERNAME }}/${{ inputs.service-name }}=${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+  #     # ── Kustomize: patch image tag ────────────────────────────────────────
+  #     # Updates the image tag in the overlay's kustomization.yaml.
+  #     # This mutates the file in-place for the apply step only — does NOT commit back.
+  #     # For GitOps (recommended later): commit this change to trigger ArgoCD/Flux.
+  #     - name: Set image tag in Kustomize overlay
+  #       run: |
+  #         cd k8s/overlays/${{ inputs.environment }}/${{ inputs.service-name }}
+  #         kustomize edit set image \
+  #           ${{ secrets.DOCKERHUB_USERNAME }}/${{ inputs.service-name }}=${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
 
-      # ── Dry run first (safety check) ─────────────────────────────────────
-      - name: Kustomize dry-run (validate manifests)
-        run: |
-          kustomize build k8s/overlays/${{ inputs.environment }}/${{ inputs.service-name }} \
-            | kubectl apply --dry-run=server -f -
+  #     # ── Dry run first (safety check) ─────────────────────────────────────
+  #     - name: Kustomize dry-run (validate manifests)
+  #       run: |
+  #         kustomize build k8s/overlays/${{ inputs.environment }}/${{ inputs.service-name }} \
+  #           | kubectl apply --dry-run=server -f -
 
-      # ── Apply ─────────────────────────────────────────────────────────────
-      - name: Kustomize apply
-        run: |
-          kustomize build k8s/overlays/${{ inputs.environment }}/${{ inputs.service-name }} \
-            | kubectl apply -f -
+  #     # ── Apply ─────────────────────────────────────────────────────────────
+  #     - name: Kustomize apply
+  #       run: |
+  #         kustomize build k8s/overlays/${{ inputs.environment }}/${{ inputs.service-name }} \
+  #           | kubectl apply -f -
 
-      # ── Rollout verification + auto-rollback ──────────────────────────────
-      # Waits up to 5 min for pods to become Ready.
-      # If timeout is hit → rolls back to previous ReplicaSet automatically.
-      - name: Verify rollout
-        run: |
-          NAMESPACE="${{ inputs.environment }}"
-          DEPLOYMENT="${{ inputs.service-name }}"
-          echo "Waiting for rollout: $DEPLOYMENT in namespace: $NAMESPACE"
-          if ! kubectl rollout status deployment/$DEPLOYMENT \
-              -n $NAMESPACE \
-              --timeout=300s; then
-            echo "::error::Rollout failed — triggering rollback"
-            kubectl rollout undo deployment/$DEPLOYMENT -n $NAMESPACE
-            exit 1
-          fi
-          echo "Rollout successful."
+  #     # ── Rollout verification + auto-rollback ──────────────────────────────
+  #     # Waits up to 5 min for pods to become Ready.
+  #     # If timeout is hit → rolls back to previous ReplicaSet automatically.
+  #     - name: Verify rollout
+  #       run: |
+  #         NAMESPACE="${{ inputs.environment }}"
+  #         DEPLOYMENT="${{ inputs.service-name }}"
+  #         echo "Waiting for rollout: $DEPLOYMENT in namespace: $NAMESPACE"
+  #         if ! kubectl rollout status deployment/$DEPLOYMENT \
+  #             -n $NAMESPACE \
+  #             --timeout=300s; then
+  #           echo "::error::Rollout failed — triggering rollback"
+  #           kubectl rollout undo deployment/$DEPLOYMENT -n $NAMESPACE
+  #           exit 1
+  #         fi
+  #         echo "Rollout successful."
 
-      # ── Post-deploy summary ───────────────────────────────────────────────
-      - name: Deployment summary
-        if: always()
-        run: |
-          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
-          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Service | ${{ inputs.service-name }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Environment | ${{ inputs.environment }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Image | ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Commit | ${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Triggered by | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+  #     # ── Post-deploy summary ───────────────────────────────────────────────
+  #     - name: Deployment summary
+  #       if: always()
+  #       run: |
+  #         echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+  #         echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+  #         echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+  #         echo "| Service | ${{ inputs.service-name }} |" >> $GITHUB_STEP_SUMMARY
+  #         echo "| Environment | ${{ inputs.environment }} |" >> $GITHUB_STEP_SUMMARY
+  #         echo "| Image | ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} |" >> $GITHUB_STEP_SUMMARY
+  #         echo "| Commit | ${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
+  #         echo "| Triggered by | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
