@@ -23,17 +23,28 @@ namespace: auth-service
 # Import the base, then layer dev-specific changes on top.
 resources:
   - ../../../base/auth-service
-  - secrets.yaml # dev-specific real values (override the placeholder Secret)
 
 # Inline ConfigMap changes for dev. Kustomize generates a new ConfigMap with
 # these values merged on top of the base's.
 configMapGenerator:
   - name: auth-service-config
     behavior: merge
-    literals:
-      - SPRING_PROFILES_ACTIVE=dev
-      - LOG_LEVEL=DEBUG
-      - SWAGGER_ENABLED=true
+    files:
+      - application.yaml=application-dev.yaml
+
+# ── Secrets from env files (gitignored) ─────────────────────────────────────
+secretGenerator:
+  - name: postgres-credentials
+    behavior: replace
+    envs:
+      - postgres.env
+  - name: auth-service-secrets
+    behavior: replace
+    envs:
+      - auth.env
+
+generatorOptions:
+  disableNameSuffixHash: true
 
 # Patches — small edits to existing resources from the base.
 patches:
@@ -54,4 +65,4 @@ patches:
 # Replace 'dev' with whichever tag your dev CI publishes, or use a specific SHA.
 images:
   - name: public.ecr.aws/o6c1v8x2/auth-service
-    newTag: dev
+    newTag: latest

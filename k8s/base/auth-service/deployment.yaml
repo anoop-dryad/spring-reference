@@ -1,15 +1,9 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Deployment: auth-service
 #
-# Runs the Spring Boot auth-service. The image is set in the base manifest
-# to a known starting point; overlays patch this with env-specific tags
-# (dev → :dev, prod → :v1.2.3, etc.).
-#
-# Key wiring:
-#   - envFrom: ConfigMap + Secret merged into env vars at startup
-#   - readiness/liveness probes: hit Spring Boot Actuator
-#   - resources: requests/limits sized for a small Spring Boot service
-#   - initContainer: wait for Postgres before starting the app
+# Secrets are injected as env vars (DB_APP_USER, JWT_SECRET, etc.).
+# The application.yaml mounted from ConfigMap references these via ${ENV_VAR}.
+# Spring Boot substitutes them at startup.
 # ─────────────────────────────────────────────────────────────────────────────
 apiVersion: apps/v1
 kind: Deployment
@@ -21,12 +15,12 @@ metadata:
     app.kubernetes.io/part-of: auth-service
     app.kubernetes.io/component: backend
 spec:
-  replicas: 1 # overlays adjust per environment
+  replicas: 1
   strategy:
     type: RollingUpdate
     rollingUpdate:
       maxSurge: 1
-      maxUnavailable: 0 # zero-downtime: new pod ready before old terminates
+      maxUnavailable: 0
   selector:
     matchLabels:
       app.kubernetes.io/name: auth-service
@@ -37,9 +31,7 @@ spec:
         app.kubernetes.io/part-of: auth-service
         app.kubernetes.io/component: backend
     spec:
-      # ── Wait for Postgres before starting the app ─────────────────────────
-      # Prevents the app from crashing on startup if Postgres isn't ready yet.
-      # initContainers run to completion before the main containers start.
+      # ── Wait for Postgres before starting ─────────────────────────────────
       initContainers:
         - name: wait-for-postgres
           image: postgres:16-alpine
@@ -47,84 +39,56 @@ spec:
             - sh
             - -c
             - |
-              until pg_isready -h postgres -p 5432 -U "$POSTGRES_USER"; do
-                echo "Waiting for postgres..."
+              until pg_isready -h "${PGHOST}" -p "${PGPORT}" -U "${DB_APP_USER}"; do
+                echo "Waiting for postgres at ${PGHOST}:${PGPORT}..."
                 sleep 2
               done
               echo "Postgres is ready."
-          env:
-            - name: POSTGRES_USER
-              valueFrom:
-                secretKeyRef:
-                  name: postgres-credentials
-                  key: POSTGRES_USER
+          envFrom:
+            - secretRef:
+                name: postgres-credentials
 
       containers:
         - name: auth-service
-          # Base image — overlays should patch this with the exact tag for each env.
-          # public.ecr.aws/o6c1v8x2/auth-service is your ECR Public repo.
           image: public.ecr.aws/o6c1v8x2/auth-service:latest
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 8081
 
-          # ── Configuration injection ────────────────────────────────────────
-          # ConfigMap → non-secret env vars (DB host, log level, etc.)
-          # Secrets → DB password, JWT secret
-          # All merged into the pod's environment at startup.
+          # ── Secrets as env vars ────────────────────────────────────────────
+          # The application.yaml in /config/application.yaml references these.
           envFrom:
-            - configMapRef:
-                name: auth-service-config
             - secretRef:
                 name: postgres-credentials
             - secretRef:
                 name: auth-service-secrets
 
-          # Map Postgres credentials to the Spring Boot env var names the app
-          # actually reads. (Or set Spring properties via SPRING_DATASOURCE_*
-          # naming — both work, depending on what your app expects.)
+          # ── Non-secret env overrides (LOG_LEVEL, SWAGGER_ENABLED) ──────────
+          # Could go in the ConfigMap, but these change per-environment and
+          # are simpler to override per-overlay as env vars.
           env:
-            - name: SPRING_DATASOURCE_URL
-              value: "jdbc:postgresql://$(DB_HOST):$(DB_PORT)/$(DB_NAME)"
-            - name: SPRING_DATASOURCE_USERNAME
-              valueFrom:
-                secretKeyRef:
-                  name: postgres-credentials
-                  key: POSTGRES_USER
-            - name: SPRING_DATASOURCE_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: postgres-credentials
-                  key: POSTGRES_PASSWORD
-            # Flyway uses a separate (higher-privilege) DB user.
-            - name: SPRING_FLYWAY_USER
-              valueFrom:
-                secretKeyRef:
-                  name: postgres-credentials
-                  key: POSTGRES_FLYWAY_USER
-            - name: SPRING_FLYWAY_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: postgres-credentials
-                  key: POSTGRES_FLYWAY_PASSWORD
+            - name: LOG_LEVEL
+              value: "INFO"
+            - name: SWAGGER_ENABLED
+              value: "false"
+
+          # ── Mount the application.yaml from the ConfigMap ──────────────────
+          # Spring Boot scans /config/ by default and picks up application.yaml.
+          volumeMounts:
+            - name: config-volume
+              mountPath: /config
+              readOnly: true
 
           # ── Health checks ──────────────────────────────────────────────────
-          # Spring Boot Actuator exposes liveness/readiness endpoints.
-          # Make sure your application.yml includes:
-          #   management:
-          #     endpoint:
-          #       health:
-          #         probes:
-          #           enabled: true
-          readinessProbe:
+          startupProbe:
             httpGet:
-              path: /actuator/health/readiness
+              path: /actuator/health/liveness
               port: http
-            initialDelaySeconds: 20
+            initialDelaySeconds: 10
             periodSeconds: 5
+            failureThreshold: 30
             timeoutSeconds: 3
-            failureThreshold: 3
 
           livenessProbe:
             httpGet:
@@ -135,21 +99,16 @@ spec:
             timeoutSeconds: 3
             failureThreshold: 3
 
-          # Startup probe gives Spring Boot extra time to come up (slow JVM start).
-          # Without this, the liveness probe could kill the pod during Flyway migrations.
-          startupProbe:
+          readinessProbe:
             httpGet:
-              path: /actuator/health/liveness
+              path: /actuator/health/readiness
               port: http
-            initialDelaySeconds: 10
+            initialDelaySeconds: 20
             periodSeconds: 5
             timeoutSeconds: 3
-            failureThreshold: 30 # 30 × 5s = 150 seconds max startup
+            failureThreshold: 3
 
           # ── Resources ──────────────────────────────────────────────────────
-          # requests = what the pod is guaranteed (used by scheduler)
-          # limits   = hard cap (pod killed if exceeded)
-          # The Dockerfile uses MaxRAMPercentage=75, so heap = 75% of limit.
           resources:
             requests:
               memory: "384Mi"
@@ -159,12 +118,16 @@ spec:
               cpu: "1000m"
 
           # ── Security context ───────────────────────────────────────────────
-          # Belt-and-suspenders security. Dockerfile already runs as non-root,
-          # this enforces it at the Kubernetes level too.
           securityContext:
             runAsNonRoot: true
             runAsUser: 1000
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false # Spring writes to /tmp
+            readOnlyRootFilesystem: false
             capabilities:
               drop: ["ALL"]
+
+      # ── Volumes ────────────────────────────────────────────────────────────
+      volumes:
+        - name: config-volume
+          configMap:
+            name: auth-service-config

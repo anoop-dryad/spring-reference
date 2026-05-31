@@ -47,4 +47,5 @@ logs/
 bin
 
 # Real secret values
-k8s/overlays/*/auth-service/secrets.yaml
+k8s/overlays/*/auth-service/auth.env
+k8s/overlays/*/auth-service/postgres.env

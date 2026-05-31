@@ -1,14 +1,10 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Postgres for auth-service.
 #
-# Uses StatefulSet (not Deployment) because Postgres needs:
-#   - Stable, predictable pod name (postgres-0)
-#   - Stable network identity (postgres-0.postgres.auth-service.svc.cluster.local)
-#   - Persistent storage that survives pod restarts
-#
-# In production on EKS, replace this with RDS PostgreSQL and remove this file.
-# The auth-service Deployment doesn't change — it just connects to a different
-# DB_HOST.
+# Reads POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD from the
+# postgres-credentials Secret. The Secret also contains the same values under
+# DB_APP_USER, DB_APP_PASSWORD, etc. — those are for the app's Spring config,
+# not for Postgres itself.
 # ─────────────────────────────────────────────────────────────────────────────
 apiVersion: apps/v1
 kind: StatefulSet
@@ -20,7 +16,7 @@ metadata:
     app.kubernetes.io/part-of: auth-service
     app.kubernetes.io/component: database
 spec:
-  serviceName: postgres # ties to the headless Service of the same name
+  serviceName: postgres
   replicas: 1
   selector:
     matchLabels:
@@ -38,11 +34,11 @@ spec:
           ports:
             - name: postgres
               containerPort: 5432
+          # The postgres image reads POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD
+          # from env vars and uses them to init the DB on first boot.
           envFrom:
             - secretRef:
                 name: postgres-credentials
-          # ── Health checks ─────────────────────────────────────────────────
-          # pg_isready exits 0 when Postgres is accepting connections.
           readinessProbe:
             exec:
               command:
@@ -57,9 +53,6 @@ spec:
             initialDelaySeconds: 30
             periodSeconds: 10
             timeoutSeconds: 3
-          # ── Resource limits ───────────────────────────────────────────────
-          # Conservative for a single-developer minikube setup.
-          # Overlay can patch these for staging/prod.
           resources:
             requests:
               memory: "128Mi"
@@ -67,24 +60,16 @@ spec:
             limits:
               memory: "256Mi"
               cpu: "500m"
-          # ── Persistent storage ────────────────────────────────────────────
-          # Mount the PVC at Postgres's data directory.
           volumeMounts:
             - name: postgres-data
               mountPath: /var/lib/postgresql/data
-              subPath: postgres # avoids "lost+found" issues on some volumes
+              subPath: postgres
 
-  # ── Volume claim template ──────────────────────────────────────────────────
-  # StatefulSet auto-creates one PVC per replica. With replicas=1, you get
-  # one PVC named postgres-data-postgres-0.
   volumeClaimTemplates:
     - metadata:
         name: postgres-data
       spec:
         accessModes: ["ReadWriteOnce"]
-        # On minikube, the default storage class is "standard" (provisioned
-        # by the storage-provisioner addon). On AWS EKS this would be "gp3".
-        # Leaving it unset uses the cluster default.
         resources:
           requests:
             storage: 1Gi

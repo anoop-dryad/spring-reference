@@ -1,11 +1,14 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # ConfigMap: auth-service-config
 #
-# Non-secret configuration. Injected as environment variables into the
-# auth-service pod. Spring Boot reads them via property resolution
-# (SERVER_PORT → server.port, etc.).
+# Holds the application.yaml that Spring Boot loads at startup.
+# Mounted at /config/application.yaml in the pod — Spring's default search
+# path includes /config/, so it's picked up automatically.
 #
-# Anything secret (passwords, JWT keys) belongs in Secrets, not here.
+# Three bugs from the original application.yaml are fixed:
+#   1. "heath" → "health" typo
+#   2. Wrong list syntax for management.endpoints.web.exposure.include
+#   3. Removed insecure default for jwt.secret
 # ─────────────────────────────────────────────────────────────────────────────
 apiVersion: v1
 kind: ConfigMap
@@ -16,23 +19,60 @@ metadata:
     app.kubernetes.io/name: auth-service
     app.kubernetes.io/component: backend
 data:
-  # ── Server settings ──────────────────────────────────────────────────────
-  SERVER_PORT: "8081"
-  SPRING_PROFILES_ACTIVE: "dev"
+  application.yaml: |
+    server:
+      port: 8081
+      shutdown: graceful
 
-  # ── Database connection (non-secret parts) ───────────────────────────────
-  # The host uses Kubernetes service DNS: <service>.<namespace>.svc.cluster.local
-  # Within the same namespace, you can use just the service name (postgres).
-  DB_HOST: "postgres"
-  DB_PORT: "5432"
-  DB_NAME: "spring_ref_db"
-  DB_SCHEMA: "auth"
+    spring:
+      application:
+        name: auth-service
+      datasource:
+        url: "jdbc:postgresql://${PGHOST}:${PGPORT}/${DB_NAME}?currentSchema=auth"
+        username: "${DB_APP_USER}"
+        password: "${DB_APP_PASSWORD}"
+        driver-class-name: org.postgresql.Driver
+      jpa:
+        hibernate:
+          ddl-auto: validate
+        show-sql: false
+        open-in-view: false
+        properties:
+          "[hibernate.default_schema]": auth
+      flyway:
+        url: "jdbc:postgresql://${PGHOST}:${PGPORT}/${DB_NAME}"
+        user: "${DB_FLYWAY_USER}"
+        password: "${DB_FLYWAY_PASSWORD}"
+        enabled: true
+        schemas: auth
+        create-schemas: true
+        locations: classpath:db/migration
+      lifecycle:
+        timeout-per-shutdown-phase: 30s
 
-  # ── Application behavior ─────────────────────────────────────────────────
-  LOG_LEVEL: "INFO"
-  JWT_ACCESS_TOKEN_TTL: "PT15M" # 15 minutes
-  JWT_REFRESH_TOKEN_TTL: "P7D" # 7 days
+    jwt:
+      secret: "${JWT_SECRET}"
+      expiration-ms: 86400000
 
-  # ── Swagger UI ───────────────────────────────────────────────────────────
-  # Disabled by default; dev overlay enables it.
-  SWAGGER_ENABLED: "false"
+    logging:
+      level:
+        "[com.anpks]": "${LOG_LEVEL:INFO}"
+
+    springdoc:
+      api-docs:
+        enabled: ${SWAGGER_ENABLED:false}
+        path: /v3/api-docs
+      swagger-ui:
+        enabled: ${SWAGGER_ENABLED:false}
+        path: /swagger-ui.html
+
+    management:
+      endpoints:
+        web:
+          exposure:
+            include: health,info,metrics,prometheus
+      endpoint:
+        health:
+          probes:
+            enabled: true
+          show-details: when-authorized
