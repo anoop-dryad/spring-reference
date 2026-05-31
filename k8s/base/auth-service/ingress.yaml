@@ -1,0 +1,43 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Ingress: auth-service
+#
+# External-facing entry point. Routes HTTPS traffic from a hostname to
+# the auth-service Service inside the cluster.
+#
+# Base sets generic structure; overlays override hostname and TLS secret name.
+#   - dev: auth.local with self-signed cert
+#   - staging: auth.staging.example.com with ACM cert
+#   - prod: auth.example.com with ACM cert
+#
+# ingressClassName=nginx works on minikube (after `minikube addons enable ingress`).
+# On AWS EKS, you'd switch this to "alb" and use AWS Load Balancer Controller.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: auth-service
+  namespace: auth-service
+  labels:
+    app.kubernetes.io/name: auth-service
+    app.kubernetes.io/part-of: auth-service
+  annotations:
+    # Force HTTP requests to redirect to HTTPS.
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - auth.local # overlay overrides this per env
+      secretName: auth-tls # overlay creates/references the actual cert secret
+  rules:
+    - host: auth.local # overlay overrides this per env
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: auth-service
+                port:
+                  number: 8081
