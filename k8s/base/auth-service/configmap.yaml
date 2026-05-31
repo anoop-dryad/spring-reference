@@ -41,8 +41,8 @@ data:
           "[hibernate.default_schema]": auth
       flyway:
         url: "jdbc:postgresql://${PGHOST}:${PGPORT}/${DB_NAME}"
-        user: "${DB_FLYWAY_USER}"
-        password: "${DB_FLYWAY_PASSWORD}"
+        user: "${DB_APP_USER}"
+        password: "${DB_APP_PASSWORD}"
         enabled: true
         schemas: auth
         create-schemas: true

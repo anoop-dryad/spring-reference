@@ -89,10 +89,6 @@ spec:
             - name: postgres-data
               mountPath: /var/lib/postgresql/data
               subPath: postgres
-            # Init scripts — run on first boot of fresh database
-            - name: init-scripts
-              mountPath: /docker-entrypoint-initdb.d
-              readOnly: true
 
       volumes:
         - name: init-scripts
