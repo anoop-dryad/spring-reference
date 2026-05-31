@@ -39,20 +39,31 @@ spec:
           envFrom:
             - secretRef:
                 name: postgres-credentials
+          # ── Startup probe ──────────────────────────────────────────────────
+          # Runs FIRST. Until this passes, liveness and readiness are skipped.
+          # Gives Postgres up to ~5 minutes to finish initializing the data
+          # directory and accept connections on first boot.
+          startupProbe:
+            exec:
+              command:
+                ["pg_isready", "-U", "$(POSTGRES_USER)", "-d", "$(POSTGRES_DB)"]
+            periodSeconds: 10 # check every 10s
+            failureThreshold: 30 # 30 × 10s = 300s max startup time
+            timeoutSeconds: 5
           readinessProbe:
             exec:
               command:
                 ["pg_isready", "-U", "$(POSTGRES_USER)", "-d", "$(POSTGRES_DB)"]
-            initialDelaySeconds: 5
             periodSeconds: 5
             timeoutSeconds: 3
+            failureThreshold: 3
           livenessProbe:
             exec:
               command:
                 ["pg_isready", "-U", "$(POSTGRES_USER)", "-d", "$(POSTGRES_DB)"]
-            initialDelaySeconds: 30
             periodSeconds: 10
             timeoutSeconds: 3
+            failureThreshold: 3
           resources:
             requests:
               memory: "128Mi"
