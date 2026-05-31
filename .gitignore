@@ -45,3 +45,6 @@ logs/
 
 .envrc
 bin
+
+# Real secret values
+k8s/overlays/*/auth-service/secrets.yml

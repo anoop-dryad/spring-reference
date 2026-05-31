@@ -41,16 +41,15 @@ springdoc:
     enabled: ${SWAGGER_ENABLED:false}
     path: /swagger-ui.html
 
-# management:
-#   endpoints:
-#     web:
-#       exposure:
-#         include:
-#         - heath,info,prometheus,metrics
-#   endpoint:
-#     health:
-#       show-details: always
-#   metrics:
-#     export:
-#       prometheus:
-#         enabled: true
+# add support for prometheus
+management:
+  endpoints:
+    web:
+      exposure:
+        include:
+          - heath,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: when-authorized
