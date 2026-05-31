@@ -1,4 +1,4 @@
-.PHONY: build-all run-all docker-build-all
+.PHONY: build-all run-all docker-build-all minikube
 
 build-all:
 	$(MAKE) -C auth-service build
@@ -8,3 +8,6 @@ run-all:
 
 docker-build-all:
 	$(MAKE) -C auth-service docker-build
+
+minikube:
+	minikube start --cpus=4 --memory=8192 --driver=docker
