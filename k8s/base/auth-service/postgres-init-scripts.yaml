@@ -1,0 +1,51 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# ConfigMap: postgres-init-scripts
+#
+# Scripts mounted into /docker-entrypoint-initdb.d/ inside the Postgres pod.
+# The postgres image automatically runs ANY .sql or .sh file in this directory
+# ONCE when the data directory is empty (first boot of a fresh database).
+#
+# What it does:
+#   - Creates the Flyway user (separate from the app user, has DDL privileges)
+#   - Grants connect + schema privileges to both users
+#
+# When it runs:
+#   - Only on FIRST Postgres init (empty data dir)
+#   - Does NOT run on pod restart if data already exists
+#
+# To re-run after data already exists:
+#   kubectl delete pvc postgres-data-postgres-0 -n auth-service
+#   kubectl delete pod postgres-0 -n auth-service
+#   (Postgres will reinitialize with a fresh data dir, scripts run again)
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init-scripts
+  namespace: auth-service
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/part-of: auth-service
+data:
+  01-create-flyway-user.sh: |
+    #!/bin/bash
+    set -e
+
+    echo "Creating Flyway user: ${DB_FLYWAY_USER}"
+
+    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+      -- Create the Flyway user (used for migrations / DDL)
+      CREATE USER ${DB_FLYWAY_USER} WITH PASSWORD '${DB_FLYWAY_PASSWORD}';
+      
+      -- Grant ability to connect to the database
+      GRANT CONNECT ON DATABASE ${POSTGRES_DB} TO ${DB_FLYWAY_USER};
+      
+      -- Grant ability to create schemas (Flyway will create 'auth' schema)
+      GRANT CREATE ON DATABASE ${POSTGRES_DB} TO ${DB_FLYWAY_USER};
+      
+      -- For dev simplicity, give Flyway broad privileges.
+      -- In production you'd narrow this — Flyway only needs DDL on its schemas.
+      ALTER USER ${DB_FLYWAY_USER} CREATEDB;
+    EOSQL
+
+    echo "Flyway user ${DB_FLYWAY_USER} created successfully."

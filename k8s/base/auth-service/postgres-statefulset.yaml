@@ -1,10 +1,14 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Postgres for auth-service.
 #
-# Reads POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD from the
-# postgres-credentials Secret. The Secret also contains the same values under
-# DB_APP_USER, DB_APP_PASSWORD, etc. — those are for the app's Spring config,
-# not for Postgres itself.
+# On first boot:
+#   - Postgres image creates POSTGRES_USER (appuser) from envFrom secret
+#   - Init scripts from postgres-init-scripts ConfigMap run automatically
+#   - Init script creates the Flyway user (DB_FLYWAY_USER)
+#
+# Probes use -h localhost to bypass PGHOST=postgres env var, which is set
+# for the app's use and would otherwise route through Service DNS from
+# inside the postgres pod itself.
 # ─────────────────────────────────────────────────────────────────────────────
 apiVersion: apps/v1
 kind: StatefulSet
@@ -34,36 +38,44 @@ spec:
           ports:
             - name: postgres
               containerPort: 5432
-          # The postgres image reads POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD
-          # from env vars and uses them to init the DB on first boot.
+          # Secret provides POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD
+          # (used by the image to initialize) AND DB_FLYWAY_USER/PASSWORD
+          # (used by the init script to create the Flyway user).
           envFrom:
             - secretRef:
                 name: postgres-credentials
-          # ── Startup probe ──────────────────────────────────────────────────
-          # Runs FIRST. Until this passes, liveness and readiness are skipped.
-          # Gives Postgres up to ~5 minutes to finish initializing the data
-          # directory and accept connections on first boot.
+
+          # ── Probes use -h localhost to avoid PGHOST interference ──────────
           startupProbe:
             exec:
               command:
-                ["pg_isready", "-U", "$(POSTGRES_USER)", "-d", "$(POSTGRES_DB)"]
-            periodSeconds: 10 # check every 10s
-            failureThreshold: 30 # 30 × 10s = 300s max startup time
+                - sh
+                - -c
+                - pg_isready -h localhost -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            periodSeconds: 10
+            failureThreshold: 30
             timeoutSeconds: 5
-          readinessProbe:
-            exec:
-              command:
-                ["pg_isready", "-U", "$(POSTGRES_USER)", "-d", "$(POSTGRES_DB)"]
-            periodSeconds: 5
-            timeoutSeconds: 3
-            failureThreshold: 3
+
           livenessProbe:
             exec:
               command:
-                ["pg_isready", "-U", "$(POSTGRES_USER)", "-d", "$(POSTGRES_DB)"]
+                - sh
+                - -c
+                - pg_isready -h localhost -U "$POSTGRES_USER" -d "$POSTGRES_DB"
             periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -h localhost -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            periodSeconds: 5
             timeoutSeconds: 3
             failureThreshold: 3
+
           resources:
             requests:
               memory: "128Mi"
@@ -71,11 +83,26 @@ spec:
             limits:
               memory: "256Mi"
               cpu: "500m"
+
           volumeMounts:
+            # Persistent data — survives pod restarts
             - name: postgres-data
               mountPath: /var/lib/postgresql/data
               subPath: postgres
+            # Init scripts — run on first boot of fresh database
+            - name: init-scripts
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
 
+      volumes:
+        - name: init-scripts
+          configMap:
+            name: postgres-init-scripts
+            defaultMode: 0755 # rwx for owner — makes .sh scripts executable
+
+  # ── Persistent storage ─────────────────────────────────────────────────────
+  # StatefulSet auto-creates one PVC per replica. Survives pod deletion.
+  # Delete the PVC explicitly to wipe data and re-run init scripts.
   volumeClaimTemplates:
     - metadata:
         name: postgres-data
