@@ -1,5 +1,18 @@
+# Dev-specific application.yaml.
+#
+# This REPLACES the application.yaml from base when applied via Kustomize's
+# configMapGenerator with `files:`. Spring Boot loads the merged ConfigMap
+# at /config/application.yaml.
+#
+# Differences from base:
+#   - show-sql: true        (SQL visible in logs for debugging)
+#   - LOG_LEVEL: DEBUG      (more verbose com.anpks logs)
+#   - More actuator endpoints exposed
+#   - show-details: always  (full health detail, not just authorized)
+
 server:
   port: 8081
+  shutdown: graceful
 
 spring:
   application:
@@ -12,7 +25,7 @@ spring:
   jpa:
     hibernate:
       ddl-auto: validate
-    show-sql: false
+    show-sql: true # Show SQL in dev
     open-in-view: false
     properties:
       "[hibernate.default_schema]": auth
@@ -24,32 +37,33 @@ spring:
     schemas: auth
     create-schemas: true
     locations: classpath:db/migration
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
 
 jwt:
-  secret: "${JWT_SECRET:default-dev-secret-key-must-be-32-chars}"
+  secret: "${JWT_SECRET}"
   expiration-ms: 86400000
 
 logging:
   level:
-    "[com.anpks]": "${LOG_LEVEL:INFO}"
+    "[com.anpks]": DEBUG # Verbose for dev
+    "[org.hibernate.SQL]": DEBUG # Show generated SQL
 
 springdoc:
   api-docs:
-    enabled: ${SWAGGER_ENABLED:false}
+    enabled: true # Swagger on in dev
     path: /v3/api-docs
   swagger-ui:
-    enabled: ${SWAGGER_ENABLED:false}
+    enabled: true
     path: /swagger-ui.html
 
-# add support for prometheus
 management:
   endpoints:
     web:
       exposure:
-        include:
-          - heath,info
+        include: health,info,metrics,prometheus,env,beans,mappings
   endpoint:
     health:
       probes:
         enabled: true
-      show-details: when-authorized
+      show-details: always # Full health info in dev
