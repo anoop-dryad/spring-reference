@@ -20,7 +20,7 @@ minikube start --cpus=2 --memory=4096 --driver=docker
 minikube addons enable ingress metrics-server
 kubectl apply -k k8s/overlays/dev/auth-service
 
-# 3. Set up TLS + ingress (see docs/TLS.md and docs/NETWORKING.md)
+# 3. Set up TLS + ingress (see docs/CERTIFICATE-TLS-README.md and docs/NETWORKING-README.md)
 ```
 
 For full setup, see the documentation below.
@@ -71,11 +71,18 @@ spring-reference/
 │       └── prod/auth-service/                  # AWS EKS prod (TBD)
 │
 ├── docs/
-│   ├── CI-CD-ARCHITECTURE.md                   # Full pipeline reference
-│   ├── NETWORKING.md                           # Network topology + troubleshooting
-│   └── TLS.md                                  # Certificate handling
-│
-├── DATABASE_SETUP.md                           # Local Postgres setup
+│   ├── CI-CD-ARCHITECTURE-README.md            # Full pipeline reference
+│   ├── DATABASE-SETUP-README.md                # Local Postgres setup
+│   ├── NETWORKING-README.md                    # Network topology + troubleshooting
+│   └── CERTIFICATE-TLS-README.md               # Certificate handling
+|
+├── scripts/
+│   ├── postgres_setup.sql                      # postgres local db setup with app and flywadb user and access
+│   ├── setup_db.sh                             # script to invoke db script
+|
+├── .gitignore
+├── .envrc                                      # env values
+├── Makefile                                    # global makefile
 └── README.md
 ```
 
