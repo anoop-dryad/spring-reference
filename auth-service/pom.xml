@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0"
-         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
     <parent>
         <groupId>org.springframework.boot</groupId>
@@ -115,12 +115,19 @@
             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
             <version>3.0.3</version>
         </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+            <scope>runtime</scope>
+        </dependency>
 
     </dependencies>
 
     <build>
         <plugins>
-            <!--to package the compiled byte code in to a jar: exclude lombok from adding its dependency to jar-->
+            <!--to
+            package the compiled byte code in to a jar: exclude lombok from adding its dependency to
+            jar-->
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
@@ -133,7 +140,8 @@
                     </excludes>
                 </configuration>
             </plugin>
-            <!--to compile java source code: lombok only needed here to generate the code-->
+            <!--to
+            compile java source code: lombok only needed here to generate the code-->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
@@ -147,7 +155,7 @@
                     </annotationProcessorPaths>
                 </configuration>
             </plugin>
-			
+
             <plugin>
                 <groupId>org.flywaydb</groupId>
                 <artifactId>flyway-maven-plugin</artifactId>
@@ -195,7 +203,8 @@
                 </executions>
             </plugin>
             <!-- Sonar Maven plugin -->
-            <!-- Source: https://mvnrepository.com/artifact/org.sonarsource.scanner.maven/sonar-maven-plugin -->
+            <!-- Source:
+            https://mvnrepository.com/artifact/org.sonarsource.scanner.maven/sonar-maven-plugin -->
             <plugin>
                 <groupId>org.sonarsource.scanner.maven</groupId>
                 <artifactId>sonar-maven-plugin</artifactId>

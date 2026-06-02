@@ -67,3 +67,7 @@ management:
       probes:
         enabled: true
       show-details: always # Full health info in dev
+  metrics:
+    tags:
+      application: ${spring.application.name}
+      environment: ${SPRING_PROFILES_ACTIVE:dev}
