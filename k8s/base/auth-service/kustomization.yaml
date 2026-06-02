@@ -24,7 +24,7 @@ resources:
   - service.yaml
   - ingress.yaml
   - hpa.yaml
-  - servicemonitor.yml
+  - servicemonitor.yaml
 
 # Labels applied to every resource. Useful for grouping and querying.
 labels:
