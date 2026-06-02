@@ -35,6 +35,7 @@ For full setup, see the documentation below.
 | [docs/CI-CD-ARCHITECTURE-README.md](./docs/CI-CD-ARCHITECTURE-README.md) | Understanding the full pipeline — CI, CD, image registry, Kustomize, EKS migration path |
 | [docs/NETWORKING-README.md](./docs/NETWORKING-README.md)                 | How traffic flows from your browser to a Spring Boot pod, debugging connectivity issues |
 | [docs/CERTIFICATE-TLS-README.md](./docs/CERTIFICATE-TLS-README.md)       | Certificate handling — self-signed for dev, Let's Encrypt / ACM for production          |
+| [docs/OBSERVABILITY.md](./docs/OBSERVABILITY.md)                         | Setting up Prometheus + Grafana, instrumenting code, building dashboards                |
 
 ---
 
