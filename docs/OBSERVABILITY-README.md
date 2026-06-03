@@ -1045,6 +1045,68 @@ For each option, the auth-service Spring Boot side is **identical**. You configu
 
 ## Troubleshooting
 
+### Grafana port-forwarding dropped
+```E0603 22:18:55.240925    7458 portforward.go:522] "Unhandled Error" err= an error occurred forwarding 3000 -> 3000: error forwarding port 3000 to pod 8b28289f41127c02f28cb9edc2dd6bffd2cfe4fc9e101af5695d1e21464d1040, uid : exit status 1: 2026/06/03 20:18:55 socat[13329] E connect(5, AF=2 127.0.0.1:3000, 16): Connection refused> error: lost connection to pod```
+
+The pod-side process (Grafana) refused the connection, so the port-forward gave up. 
+Most likely Grafana crashed, restarted, or is being slow to respond on a memory-pressured cluster.
+
+```bash
+Diagnose:
+# 1. Is Grafana pod still running?
+k get pods -n monitoring | grep grafana
+
+# 2. Has it restarted recently?
+k get pods -n monitoring -o wide
+
+# 3. Why might it have died?
+k describe pod -n monitoring -l app.kubernetes.io/name=grafana | grep -A 10 "Last State\|Events"
+
+# 4. Check the logs
+k logs -n monitoring -l app.kubernetes.io/name=grafana --tail=50
+```
+
+Results from the describe pod query
+
+```bash
+    Last State:      Terminated
+      Reason:        OOMKilled
+      Exit Code:     137
+      Started:       Wed, 03 Jun 2026 22:17:52 +0200
+      Finished:      Wed, 03 Jun 2026 22:18:54 +0200
+    Ready:           True
+    Restart Count:   3
+    Limits:
+      memory:  200Mi
+    Requests:
+      memory:   100Mi
+```
+Fix :
+
+```bash
+helm upgrade monitoring prometheus-community/kube-prometheus-stack \
+  --namespace monitoring \
+  --reuse-values \
+  --set grafana.resources.limits.memory=400Mi \
+  --set grafana.resources.requests.memory=200Mi
+
+What this does:
+
+helm upgrade — modifies existing release (vs. install for new)
+--reuse-values — keep all other settings we set during install
+grafana.resources.limits.memory=400Mi — hard cap doubled
+grafana.resources.requests.memory=200Mi — guaranteed allocation doubled
+
+```
+
+Check Prometheus targets UI (`http://localhost:9090/targets`):
+
+- ServiceMonitor not showing at all → Prometheus operator isn't watching its namespace
+  - Fix: when installing, ensure `serviceMonitorSelectorNilUsesHelmValues=false` (we did this)
+- Target shows but status DOWN → scrape is failing
+  - Click the error message for details
+  - Common: wrong path, wrong port, /actuator/prometheus not enabled in app
+
 ### ServiceMonitor exists but Prometheus doesn't scrape
 
 Check Prometheus targets UI (`http://localhost:9090/targets`):
