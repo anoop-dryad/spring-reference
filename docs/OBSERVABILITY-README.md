@@ -1045,7 +1045,10 @@ For each option, the auth-service Spring Boot side is **identical**. You configu
 
 ## Troubleshooting
 
-### Grafana port-forwarding dropped
+### Grafana port-forwarding dropped 
+
+Grafana port-forward call `kubectl port-forward -n monitoring svc/monitoring-grafana 3000:80`:
+
 ```E0603 22:18:55.240925    7458 portforward.go:522] "Unhandled Error" err= an error occurred forwarding 3000 -> 3000: error forwarding port 3000 to pod 8b28289f41127c02f28cb9edc2dd6bffd2cfe4fc9e101af5695d1e21464d1040, uid : exit status 1: 2026/06/03 20:18:55 socat[13329] E connect(5, AF=2 127.0.0.1:3000, 16): Connection refused> error: lost connection to pod```
 
 The pod-side process (Grafana) refused the connection, so the port-forward gave up. 
@@ -1098,14 +1101,6 @@ grafana.resources.limits.memory=400Mi — hard cap doubled
 grafana.resources.requests.memory=200Mi — guaranteed allocation doubled
 
 ```
-
-Check Prometheus targets UI (`http://localhost:9090/targets`):
-
-- ServiceMonitor not showing at all → Prometheus operator isn't watching its namespace
-  - Fix: when installing, ensure `serviceMonitorSelectorNilUsesHelmValues=false` (we did this)
-- Target shows but status DOWN → scrape is failing
-  - Click the error message for details
-  - Common: wrong path, wrong port, /actuator/prometheus not enabled in app
 
 ### ServiceMonitor exists but Prometheus doesn't scrape
 
