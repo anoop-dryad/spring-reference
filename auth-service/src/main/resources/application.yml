@@ -17,6 +17,7 @@ server:
 spring:
   application:
     name: auth-service
+    version: 1.0.0
   datasource:
     url: "jdbc:postgresql://${PGHOST}:${PGPORT}/${DB_NAME}?currentSchema=auth"
     username: "${DB_APP_USER}"
@@ -46,8 +47,15 @@ jwt:
 
 logging:
   level:
-    "[com.anpks]": DEBUG # Verbose for dev
+    "[com.anpks]": INFO # Verbose for dev
     "[org.hibernate.SQL]": DEBUG # Show generated SQL
+  structured:
+    format:
+      console: ecs
+    ecs:
+      service:
+        name: auth-service
+        environment: ${spring.profiles.active:dev}
 
 springdoc:
   api-docs:
