@@ -57,6 +57,13 @@ data:
     logging:
       level:
         "[com.anpks]": "${LOG_LEVEL:INFO}"
+      structured:
+        format:
+          console: ecs
+        ecs:
+          service:
+            name: auth-service
+            environment: ${spring.profiles.active:dev}
 
     springdoc:
       api-docs:

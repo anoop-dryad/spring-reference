@@ -17,7 +17,6 @@ server:
 spring:
   application:
     name: auth-service
-    version: 1.0.0
   datasource:
     url: "jdbc:postgresql://${PGHOST}:${PGPORT}/${DB_NAME}?currentSchema=auth"
     username: "${DB_APP_USER}"
