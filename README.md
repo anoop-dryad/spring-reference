@@ -36,7 +36,7 @@ For full setup, see the documentation below.
 | [docs/NETWORKING-README.md](./docs/NETWORKING-README.md)                 | How traffic flows from your browser to a Spring Boot pod, debugging connectivity issues |
 | [docs/CERTIFICATE-TLS-README.md](./docs/CERTIFICATE-TLS-README.md)       | Certificate handling — self-signed for dev, Let's Encrypt / ACM for production          |
 | [docs/OBSERVABILITY.md](./docs/OBSERVABILITY.md)                         | Setting up Prometheus + Grafana, instrumenting code, building dashboards                |
-| [docs/LOGGING.md](./docs/LOGGING.md)                                     | Setting up Loki + Promtail, structured logging in Spring Boot, LogQL queries            |
+| [docs/LOGGING-README.md](./docs/LOGGING.md)                              | Setting up Loki + Promtail, structured logging in Spring Boot, LogQL queries            |
 
 ---
 
@@ -76,7 +76,7 @@ k8s-springboot-platform/
 │   ├── CI-CD-ARCHITECTURE-README.md            # Full pipeline reference
 │   ├── DATABASE-SETUP-README.md                # Local Postgres setup
 │   ├── NETWORKING-README.md                    # Network topology + troubleshooting
-|   ├── LOGGING.md                              # Logs (Loki + structured)
+|   ├── LOGGING-README.md                       # Logs (Loki + structured)
 │   └── CERTIFICATE-TLS-README.md               # Certificate handling
 |
 ├── scripts/
