@@ -1,6 +1,6 @@
 # spring-reference
 
-> A reference monorepo for Spring Boot microservices with production-grade CI/CD, Kubernetes deployment, and AWS EKS migration path.
+> A production grade monorepo for Spring Boot microservices with CI/CD, Kubernetes deployment, and AWS EKS migration path.
 
 The current reference service is **auth-service** — a JWT-based authentication service using Spring Boot 4, PostgreSQL 16, and Flyway migrations.
 
