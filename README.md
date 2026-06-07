@@ -287,4 +287,4 @@ Before opening a PR:
 
 ## License
 
-[Add your license here — MIT, Apache 2.0, etc.]
+MIT
