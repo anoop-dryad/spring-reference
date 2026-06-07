@@ -1,4 +1,4 @@
-# spring-reference
+# k8s-springboot-platform
 
 > A production grade monorepo for Spring Boot microservices with CI/CD, Kubernetes deployment, and AWS EKS migration path.
 
@@ -42,7 +42,7 @@ For full setup, see the documentation below.
 ## Repository Structure
 
 ```
-spring-reference/
+k8s-springboot-platform/
 │
 ├── .github/
 │   ├── dependabot.yml                          # Dependency CVE surveillance
