@@ -26,7 +26,7 @@ RUN mvn package -DskipTests --no-transfer-progress -B \
 
 # ── Stage 2: Layer extraction ─────────────────────────────────────────────────
 # Use the JRE here — we only need `java` to run layertools.
-FROM eclipse-temurin:25-jre-alpine AS layers
+FROM eclipse-temurin:25-jre-alpine-3.21 AS layers
 
 WORKDIR /build
 COPY --from=builder /build/target/app.jar app.jar
@@ -42,7 +42,7 @@ RUN java -Djarmode=tools -jar app.jar extract --layers --destination extracted
 # These aren't just folders — they're sorted by change frequency, least-changing first.
 
 # ── Stage 3: Runtime ──────────────────────────────────────────────────────────
-FROM eclipse-temurin:25-jre-alpine AS runtime
+FROM eclipse-temurin:25-jre-alpine-3.21 AS runtime
 
 # wget ships with BusyBox in Alpine — no need to install curl just for healthchecks.
 # If you must have curl (e.g. for sidecar debugging), uncomment:

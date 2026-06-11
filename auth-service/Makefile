@@ -71,6 +71,10 @@ docker-stop:
 docker-logs:
 	docker logs -f $(APP_NAME)
 
+# docker image vulnerability check
+docker-cve:
+	docker scout cves <image name>
+
 # ── DB ────────────────────────────────────────────────────────────────────────
 db-setup:
 	../scripts/setup_db.sh
