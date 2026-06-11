@@ -30,9 +30,9 @@ FROM eclipse-temurin:25-jre-alpine AS layers
 
 WORKDIR /build
 COPY --from=builder /build/target/app.jar app.jar
-# Spring Boot ships a tool called layertools that splits the fat JAR 
+# Spring Boot ships a tool called tools that splits the fat JAR 
 # back into separate directories based on how often things change:
-RUN java -Djarmode=layertools -jar app.jar extract
+RUN java -Djarmode=tools -jar app.jar extract --layers --destination extracted
 # after running the above command, we get 4 directories instead of one jar
 #   /build/
 #       ├── dependencies/              ← ~45MB — third-party libs (changes rarely)
@@ -59,10 +59,10 @@ WORKDIR /app
 
 # Copy layers in order from least-to-most frequently changed.
 # Use --chown so the running user actually owns its files.
-COPY --from=layers --chown=appuser:appgroup /build/dependencies/          ./
-COPY --from=layers --chown=appuser:appgroup /build/spring-boot-loader/    ./
-COPY --from=layers --chown=appuser:appgroup /build/snapshot-dependencies/ ./
-COPY --from=layers --chown=appuser:appgroup /build/application/           ./
+COPY --from=layers --chown=appuser:appgroup /build/extracted/dependencies/          ./
+COPY --from=layers --chown=appuser:appgroup /build/extracted/spring-boot-loader/    ./
+COPY --from=layers --chown=appuser:appgroup /build/extracted/snapshot-dependencies/ ./
+COPY --from=layers --chown=appuser:appgroup /build/extracted/application/           ./
 
 USER appuser
 
